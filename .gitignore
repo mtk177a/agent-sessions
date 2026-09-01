@@ -1,0 +1,16 @@
+# Local environment
+.env
+.env.*
+
+# Local runtime and test data
+.local/
+tmp/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/

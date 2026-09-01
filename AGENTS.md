@@ -6,8 +6,7 @@ This file defines repository-specific instructions for agents working on `agent-
 
 `agent-sessions` is a public, local-first tool for read-only access to coding-agent session records across providers.
 
-The repository owns provider access, normalization, verification, and public contracts.
-
+The repository owns provider access, normalization, verification, and public contracts.\
 It does not own consumer-specific interpretation, retrospective findings, personal context, or processing state.
 
 ## Read first
@@ -18,9 +17,10 @@ Before making a material design or implementation change, read:
 2. `docs/architecture.md`
 3. any ADR directly relevant to the change
 
-Do not scan unrelated documentation merely to increase coverage.
+Additional reading rules are:
 
-When provider behavior materially affects a design, verify the current provider documentation or implementation rather than relying on historical assumptions.
+- Do not scan unrelated documentation merely to increase coverage.
+- When provider behavior materially affects a design, verify the current provider documentation or implementation rather than relying on historical assumptions.
 
 ## Public information boundary
 
@@ -36,9 +36,9 @@ Do not add:
 - real usernames, hostnames, home directories, or machine-specific paths;
 - private consumer implementation details.
 
-Requirements learned from a private or environment-specific use case may be incorporated only after expressing them as general product requirements that stand on their own.
-
-For example, it is valid to require multiple independently named Codex source instances. It is not valid to document the private system or machine that originally exposed that requirement.
+Requirements learned from a private or environment-specific use case may be incorporated only after expressing them as general product requirements that stand on their own.\
+For example, it is valid to require multiple independently named Codex source instances.\
+It is not valid to document the private system or machine that originally exposed that requirement.
 
 ## Core architecture constraints
 
@@ -52,49 +52,44 @@ Preserve the following unless an explicit architecture decision supersedes them:
 - Complete transcripts are not mirrored into an `agent-sessions` datastore.
 - No daemon, watcher, timer, or periodic synchronization process is required.
 - Multiple stores for the same provider remain distinct through named source instances.
-- Filesystem paths are locators, not stable logical identities.
+- File system paths are locators, not stable logical identities.
 - Provider-internal storage layout belongs in provider adapters, not normal user configuration.
 - Incomplete, unsupported, and failed observation remain distinguishable.
 
-Do not introduce a database, persistent index, background process, hook-based ingestion path, or transcript mirror merely because it may become useful later.
-
+Do not introduce a database, persistent index, background process, hook-based ingestion path, or transcript mirror merely because it may become useful later.\
 Such additions require an observed need, measured evidence, and review of the relevant architecture decision.
 
 ## Disk and resource behavior
 
 SSD write endurance is an explicit design concern.
 
-Do not add persistent writes to a read-only command.
+Disk and resource behavior must follow these rules:
 
-Do not add periodic whole-history scans or high-frequency state updates to improve interactive latency without measured evidence that the tradeoff is necessary.
-
-Any future cache must be disposable and non-authoritative.
-
-Deleting it must affect performance only.
-
-When a change affects persistent I/O behavior, verify the write path directly rather than inferring safety from application-level payload size.
+- Do not add persistent writes to a read-only command.
+- Do not add periodic whole-history scans or high-frequency state updates to improve interactive latency without measured evidence that the tradeoff is necessary.
+- Any future cache must be disposable and non-authoritative.\
+  Deleting it must affect performance only.
+- When a change affects persistent I/O behavior, verify the write path directly rather than inferring safety from application-level payload size.
 
 ## Provider access
 
-Prefer documented provider interfaces when they satisfy the repository's read-only contract.
+Provider access must follow these rules:
 
-Do not treat an interface as safe solely because it is official.
-
-If an official read operation performs metadata repair, migration, synchronization, or another persistent mutation, evaluate a safer supported path.
-
-Provider-specific parsing must remain isolated behind provider boundaries.
-
-Do not expose unstable provider-internal structures as a stable public contract without an explicit compatibility decision.
+- Prefer documented provider interfaces when they satisfy the repository's read-only contract.
+- Do not treat an interface as safe solely because it is official.
+- If an official read operation performs metadata repair, migration, synchronization, or another persistent mutation, evaluate a safer supported path.
+- Provider-specific parsing must remain isolated behind provider boundaries.
+- Do not expose unstable provider-internal structures as a stable public contract without an explicit compatibility decision.
 
 ## Fixtures and tests
 
-Use synthetic fixtures only.
+Fixtures and test data must follow these rules:
 
-Synthetic fixtures should be minimal but must cover the behavior being tested, including malformed or adversarial input when relevant.
-
-Do not derive committed fixtures by redacting real private sessions. Construct them independently.
-
-Use obviously fictional values for credential-like test data.
+- Use synthetic fixtures only.
+- Synthetic fixtures should be minimal but must cover the behavior being tested, including malformed or adversarial input when relevant.
+- Do not derive committed fixtures by redacting real private sessions.\
+  Construct them independently.
+- Use obviously fictional values for credential-like test data.
 
 ## Consumer boundary
 
@@ -106,8 +101,7 @@ Do not add domain-specific concepts such as:
 - personal-memory classifications;
 - downstream workflow status.
 
-The access layer exposes source identity, source version, normalized observations, completeness, and verification evidence.
-
+The access layer exposes source identity, source version, normalized observations, completeness, and verification evidence.\
 Consumers own the meaning applied to those observations.
 
 ## Language
@@ -140,8 +134,7 @@ External contributors are not required to follow the maintainer's Japanese workf
 
 ## Change discipline
 
-Prefer the smallest change that fully satisfies the current requirement and preserves the public contracts.
-
+Prefer the smallest change that fully satisfies the current requirement and preserves the public contracts.\
 Do not expand provider support, compatibility layers, caches, indexes, background processing, or configuration surfaces without a concrete requirement.
 
 When changing an architectural invariant:
@@ -155,8 +148,8 @@ Do not add historical implementation narration to current-state documentation un
 
 ## Validation
 
-Run the narrowest deterministic checks that can demonstrate the affected contract.
+Validation must follow these rules:
 
-As implementation is added, document the canonical repository validation commands here or in a dedicated contributor document rather than inventing commands per task.
-
-Always inspect the final diff for accidental private information and machine-specific paths before reporting completion.
+- Run the narrowest deterministic checks that can demonstrate the affected contract.
+- As implementation is added, document the canonical repository validation commands here or in a dedicated contributor document rather than inventing commands per task.
+- Always inspect the final diff for accidental private information and machine-specific paths before reporting completion.

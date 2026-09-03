@@ -1,0 +1,12 @@
+{
+  "schema_version": "v0alpha1",
+  "source": {
+    "native_id": "00000000-0000-4000-8000-000000000001",
+    "kind": "session"
+  },
+  "events": [
+    {"kind": "message", "role": "user", "text": "Fictional hello"},
+    {"kind": "tool_call", "call_id": "call-1", "category": "filesystem"},
+    {"kind": "tool_result", "call_id": "call-1", "success": true, "exit_code": 0}
+  ]
+}

@@ -175,7 +175,14 @@ source instance
 provider-native source ID
 ```
 
-The exact serialized `source_ref` representation is a public CLI contract and remains undefined until the initial CLI schema is implemented.
+The provisional `v0alpha1` CLI uses a deterministic reference with this form:
+
+```text
+as0:<provider>:<source-instance>:<source-id-fingerprint>
+```
+
+The fingerprint is a domain-separated SHA-256 hash of the provider-native source ID.\
+It avoids embedding the raw ID or a machine-local locator in the command-line reference.
 
 A file system location is not source identity.
 
@@ -278,19 +285,24 @@ If an official operation performs metadata repair, migration, synchronization, o
 
 File system parsing is an acceptable fallback when needed to preserve the stronger read-only contract.
 
+File-backed adapters open only bounded regular files.\
+The core rejects special files without blocking and rechecks the opened file identity, resolved path containment, and provider-root identity before reading so a path replacement cannot escape the configured source boundary.
+
 Provider-internal formats are version-sensitive inputs and are not automatically promoted to public `agent-sessions` contracts.
 
 ### Codex
 
-The Codex adapter may use documented Codex interfaces or provider-owned artifacts depending on the operation and observed side effects.
+The accepted boundary for the pending Codex adapter is the documented Codex home and the `sessions` and `archived_sessions` transcript locations.\
+The adapter will not start the Codex App Server for read-only inspection.
 
-The adapter should prefer provider-level configuration such as a Codex home rather than requiring users to configure an internal session directory.
+User configuration identifies the Codex home rather than an internal session directory.
 
 Multiple Codex homes or stores are represented by separate named source instances.
 
 ### Claude Code
 
-The Claude Code adapter resolves a provider configuration root and reads provider-owned session artifacts without modifying them.
+The accepted boundary for the pending Claude Code adapter is its documented configuration root and project transcript location.\
+The adapter will read provider-owned session artifacts without modifying them.
 
 Multiple independently stored Claude Code roots are represented by separate named source instances.
 
@@ -347,28 +359,26 @@ The adapter owns knowledge of internal layout.
 Source locators may contain machine-specific paths and mount points.\
 They therefore belong in machine-local configuration rather than portable repository files.
 
-The final configuration file format and operating-system-specific configuration location will be defined with the initial implementation.
+The optional `v0alpha1` configuration is strict JSON at `agent-sessions/config.json` below the directory returned by `os.UserConfigDir`.\
+It contains named `sources` with `id`, `provider`, and absolute provider-level `root` fields.
 
 ### Named source instances
 
 Multiple instances for one provider are valid.
 
-An illustrative configuration may eventually express concepts such as:
+The implemented configuration expresses these concepts as strict JSON:
 
-```toml
-[[sources]]
-id = "codex-wsl"
-provider = "codex"
-home = "/path/to/codex-home"
-
-[[sources]]
-id = "codex-windows-app"
-provider = "codex"
-home = "/mounted/path/to/codex-home"
+```json
+{
+  "schema_version": "v0alpha1",
+  "sources": [
+    {"id": "codex-one", "provider": "codex", "root": "/fictional/codex-one"},
+    {"id": "codex-two", "provider": "codex", "root": "/fictional/codex-two"}
+  ]
+}
 ```
 
-This example describes the model only.\
-It does not freeze the final configuration schema.
+The locators are fictional examples, and the Codex adapter is not implemented yet.
 
 ## Statelessness and storage
 
@@ -438,6 +448,9 @@ The public result model must distinguish at least the following states:
 Bounded output and pagination must be explicit.\
 A truncated result must not silently appear complete.
 
+When `list` combines providers, aggregation is order-independent.\
+All-unsupported observations remain `unsupported`, while usable observations combined with unsupported omissions are `partial`.
+
 ## Security and privacy
 
 Historical interaction records are untrusted data.
@@ -461,9 +474,9 @@ The security boundary requires the following:
 * Committed tests and fixtures must be synthetic.
 * Real private session data must not be converted into committed fixtures, even after manual redaction.
 
-## Intended CLI surface
+## Implemented CLI core
 
-The initial CLI should remain small.
+The provider-neutral Go executable implements the provisional machine-readable core for the following operations.
 
 The expected responsibilities are equivalent to:
 
@@ -471,13 +484,12 @@ The expected responsibilities are equivalent to:
 
 Discover logical sources and return bounded metadata.
 
-Potential filters may include:
+Implemented selection and pagination flags include:
 
 * provider;
 * source instance;
-* working directory or repository;
-* time range;
-* parent/main-session relationship.
+* page limit and cursor;
+* explicit provider-level root.
 
 ### `show`
 
@@ -493,7 +505,10 @@ Perform the stronger read needed to verify source identity, readability, complet
 
 No command implies that a downstream consumer has reviewed or accepted a source.
 
-Exact names, flags, JSON fields, exit codes, and versioning rules become public contracts only when implemented and documented.
+The exact provisional fields, exit codes, pagination behavior, bounds, and final-redaction policy are documented in [CLI JSON contract](cli-json-contract.md).
+
+The current executable contains the provider-neutral core but no production provider adapters.\
+Codex and Claude Code discovery and event decoding remain pending adapter work, and the schema is not stable v1.
 
 ## Consumer responsibilities
 

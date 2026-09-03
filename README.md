@@ -57,7 +57,8 @@ The core goals are:
 ### Read-only
 
 Provider-owned interaction records remain the source of truth.\
-Read operations must not modify provider history, provider metadata, or consumer state.
+Read operations do not write provider history, provider application metadata, or consumer state.\
+The host file system may update access-time metadata as a consequence of reading a provider file.
 
 A provider's official interface is preferred when it satisfies this contract.\
 When it does not provide a sufficiently strict read-only path, a safer supported access path may be used instead.

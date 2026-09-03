@@ -72,9 +72,12 @@ other local tooling
 An operation whose purpose is inspection must not modify:
 
 * provider-owned interaction records;
-* provider-owned metadata;
+* provider-owned application metadata;
 * consumer state;
 * persistent `agent-sessions` application state.
+
+The adapter does not write those values.\
+The host file system may update access-time metadata when a provider file is read; that file-system side effect is outside the semantic no-write guarantee.
 
 An official provider interface is acceptable only when its concrete behavior preserves this contract for the requested operation.
 

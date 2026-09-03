@@ -28,7 +28,8 @@ The decoder is intentionally scoped to rollout JSONL written by Codex CLI `0.149
 Compatibility was checked against the official `openai/codex` tag [`rust-v0.149.1`](https://github.com/openai/codex/tree/rust-v0.149.1) at commit [`ff29a44391deccde0aba0f8390337d7f3c319ea4`](https://github.com/openai/codex/commit/ff29a44391deccde0aba0f8390337d7f3c319ea4), including the protocol, history, thread-store, and state extraction implementations.
 
 The adapter recognizes the `session_meta`, `event_msg`, and `response_item` rollout envelopes needed for the public observations.\
-For legacy history, `user_message` and `agent_message` events are the canonical message rows, while correlated response tool calls and terminal command events provide tool observations.\
+For legacy history, `user_message` and `agent_message` events are the canonical message rows, while response tool calls and their persisted output rows provide correlation evidence.\
+Legacy output rows do not persist the internal success value, so the adapter omits the normalized result instead of guessing its outcome.\
 For paginated history, completed `UserMessage`, `AgentMessage`, `CommandExecution`, `McpToolCall`, and `DynamicToolCall` items are canonical; lower-level response rows are not emitted again.
 
 Tool call identifiers are deterministic adapter-owned hashes of the thread identity and provider correlation identifier.\
@@ -39,7 +40,7 @@ Parent and fork relationships are emitted only from explicit `parent_thread_id` 
 
 ## Completeness and limitations
 
-Unknown envelopes, unknown event variants, malformed JSONL, oversized rows, omitted correlations, duplicate call identifiers, and unverified CLI versions prevent `complete`.\
+Unknown envelopes, unknown event variants, unsupported known items or message content, malformed JSONL, oversized rows, omitted correlations or tool results, duplicate call identifiers, invalid relationship identifiers, and unverified CLI versions prevent `complete`.\
 Useful observations return `partial`; a recognized source that cannot yield a safe useful result returns `unsupported`; I/O and resource failures return `error`.
 
 Compressed `.jsonl.zst` rollouts are recognized but not decoded because the executable has no external compression dependency.\
@@ -48,7 +49,8 @@ Rollouts with `history_base` return only current-artifact observations and expli
 Artifacts are limited to 64 MiB, individual rows and headers to 1 MiB, discovered files to 100,000, and normalized events to 100,000.\
 These are adapter input bounds in addition to the public response and pagination bounds.
 
-Read-only commands create no index, cache, mirror, database, or provider metadata update.\
+Read-only commands create no index, cache, mirror, database, or provider application metadata update.\
+The host file system may update access-time metadata when rollout files are read.\
 Lifecycle hooks, preregistration, synchronization, and background ingestion are not discovery dependencies.
 
 ## Public location evidence

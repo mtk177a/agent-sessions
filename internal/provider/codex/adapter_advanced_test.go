@@ -28,7 +28,7 @@ func TestPaginatedHistoryUsesCompletedItemsAsCanonicalRows(t *testing.T) {
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"duplicate"}]}}`,
 		`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"secret\"}","call_id":"raw-call"}}`,
 		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"canonical user"}]}}}`,
-		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"agent-1","content":[{"type":"text","text":"canonical assistant"}]}}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"agent-1","content":[{"type":"Text","text":"canonical assistant"}]}}}`,
 		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"must not escape"}}}`,
 	})
 	result := eventsForOnlySource(t, home)
@@ -53,14 +53,81 @@ func TestPaginatedHistoryUsesCompletedItemsAsCanonicalRows(t *testing.T) {
 	}
 }
 
+func TestLegacyPersistedToolOutputDoesNotGuessSuccess(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.149.1", "legacy", ""),
+		`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"provider-call"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"provider-call","output":"fictional output"}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].ToolCall == nil || !hasOmission(result.Omissions, "unsupported_tool_result") {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
+func TestLegacyToolCallWithoutPersistedOutputIsPartial(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.149.1", "legacy", ""),
+		`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"provider-call"}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].ToolCall == nil || !hasOmission(result.Omissions, "correlation_omitted") {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
+func TestPaginatedUnsupportedKnownItemsDegradeCompleteness(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.149.1", "paginated", ""),
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"usable"}]}}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","id":"change-1"}}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CollabAgentToolCall","id":"agent-1"}}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 1 || countOmissions(result.Omissions, "unsupported_event") != 2 {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
+func TestPaginatedUserMessageReportsUnsupportedContent(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.149.1", "paginated", ""),
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"usable"},{"type":"image","image_url":"data:image/png;base64,fictional"}]}}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-2","content":[{"type":"audio","audio_url":"data:audio/wav;base64,fictional"}]}}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].Message == nil || result.Events[0].Message.Text != "usable" || countOmissions(result.Omissions, "unsupported_content") != 2 {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
+func TestUnverifiedTopLevelRowsDegradeCompleteness(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.149.1", "legacy", ""),
+		`{"type":"event_msg","payload":{"type":"user_message","message":"usable"}}`,
+		`{"type":"token_usage_record","payload":{}}`,
+		`{"type":"retained_context","payload":{}}`,
+		`{"type":"realtime_item","payload":{}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 1 || countOmissions(result.Omissions, "unknown_format") != 3 {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
 func TestCorrelationFailuresArePartialAndNotGuessed(t *testing.T) {
 	home := t.TempDir()
 	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
 		header(testThreadID, "0.149.1", "legacy", ""),
 		`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"same"}}`,
 		`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"same"}}`,
-		`{"type":"event_msg","payload":{"type":"exec_command_end","call_id":"orphan","exit_code":0}}`,
-		`{"type":"event_msg","payload":{"type":"exec_command_end","call_id":"orphan","exit_code":0}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"orphan","output":"fictional output"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"orphan","output":"fictional output"}}`,
 	})
 	result := eventsForOnlySource(t, home)
 	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].ToolCall == nil || len(result.Omissions) != 3 {
@@ -74,6 +141,16 @@ func TestRelationshipsRequireExplicitProviderFields(t *testing.T) {
 	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", extra)})
 	listed := New().List(context.Background(), testSource(home))
 	if listed.Status != contract.StatusComplete || len(listed.Sources) != 1 || len(listed.Sources[0].Relationships) != 2 {
+		t.Fatalf("List() = %#v", listed)
+	}
+}
+
+func TestMalformedRelationshipIDsAreOmitted(t *testing.T) {
+	home := t.TempDir()
+	extra := `,"parent_thread_id":"not-a-thread-id","forked_from_id":"also-invalid"`
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", extra)})
+	listed := New().List(context.Background(), testSource(home))
+	if listed.Status != contract.StatusPartial || len(listed.Sources) != 1 || len(listed.Sources[0].Relationships) != 0 || countOmissions(listed.Omissions, "malformed_record") != 2 {
 		t.Fatalf("List() = %#v", listed)
 	}
 }
@@ -127,6 +204,27 @@ func TestUnsupportedVersionAndMalformedHeaderDegradeDiscovery(t *testing.T) {
 	}
 }
 
+func TestMalformedOnlyDiscoveryIsUnsupported(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{`{"type":"future_header","payload":{}}`})
+	listed := New().List(context.Background(), testSource(home))
+	if listed.Status != contract.StatusUnsupported || len(listed.Sources) != 0 || !hasOmission(listed.Omissions, "malformed_record") {
+		t.Fatalf("List() = %#v", listed)
+	}
+	var output bytes.Buffer
+	exit := (cli.Runner{Version: "test", Registry: provider.NewRegistry(New())}).Run(context.Background(), []string{"list", "--provider", "codex", "--root", home}, &output)
+	if exit != cli.ExitUnsupported {
+		t.Fatalf("list exit = %d, output = %s", exit, output.String())
+	}
+	var envelope contract.Envelope
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Status != contract.StatusUnsupported || envelope.Data != nil {
+		t.Fatalf("list envelope = %#v", envelope)
+	}
+}
+
 func TestOversizedRowDegradesEventsAndOversizedArtifactFails(t *testing.T) {
 	home := t.TempDir()
 	path := rolloutPath(home, "sessions", testThreadID)
@@ -174,7 +272,7 @@ func TestEventLimitProducesPartialResult(t *testing.T) {
 	}
 }
 
-func TestCLIIntegrationAndReadOnlyBehavior(t *testing.T) {
+func TestCLIIntegrationPreservesProviderContentAndSemanticMetadata(t *testing.T) {
 	home := t.TempDir()
 	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
 		header(testThreadID, "0.149.1", "legacy", ""),
@@ -281,6 +379,16 @@ func hasOmission(omissions []contract.Omission, code string) bool {
 		}
 	}
 	return false
+}
+
+func countOmissions(omissions []contract.Omission, code string) int {
+	count := 0
+	for _, item := range omissions {
+		if item.Code == code {
+			count++
+		}
+	}
+	return count
 }
 
 func runCLI(t *testing.T, runner cli.Runner, args ...string) contract.Envelope {

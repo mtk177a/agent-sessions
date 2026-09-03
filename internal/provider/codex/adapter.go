@@ -35,6 +35,7 @@ const (
 var errAmbiguousArtifact = errors.New("ambiguous Codex artifact")
 
 var rolloutNamePattern = regexp.MustCompile(`^rollout-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))?\.jsonl(?:\.zst)?$`)
+var threadIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 type Adapter struct{}
 
@@ -103,13 +104,19 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 		if ambiguous {
 			omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
 		}
-		sources = append(sources, makeSource(source, selected))
+		itemSource, relationshipOmissions := makeSource(source, selected)
+		sources = append(sources, itemSource)
+		omissions = append(omissions, relationshipOmissions...)
 		if selected.meta.CLIVersion != supportedVersion {
 			omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
 		}
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Identity.SourceRef < sources[j].Identity.SourceRef })
-	return provider.SourceResult{Status: statusFor(omissions), Sources: sources, Omissions: omissions}
+	status := statusFor(omissions)
+	if len(sources) == 0 && len(omissions) > 0 {
+		status = contract.StatusUnsupported
+	}
+	return provider.SourceResult{Status: status, Sources: sources, Omissions: omissions}
 }
 
 func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint string) provider.SourceResult {
@@ -129,7 +136,9 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 	if selected.meta.CLIVersion != supportedVersion {
 		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
 	}
-	return provider.SourceResult{Status: statusFor(omissions), Sources: []contract.Source{makeSource(source, selected)}, Omissions: omissions}
+	itemSource, relationshipOmissions := makeSource(source, selected)
+	omissions = append(omissions, relationshipOmissions...)
+	return provider.SourceResult{Status: statusFor(omissions), Sources: []contract.Source{itemSource}, Omissions: omissions}
 }
 
 func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint string) provider.EventResult {
@@ -312,7 +321,7 @@ func selectArtifact(candidates []artifact) (artifact, bool) {
 	return selected, ambiguous
 }
 
-func makeSource(source config.Source, item artifact) contract.Source {
+func makeSource(source config.Source, item artifact) (contract.Source, []contract.Omission) {
 	identity := contract.SourceIdentity{
 		Provider:                  providerName,
 		SourceInstance:            source.ID,
@@ -321,11 +330,20 @@ func makeSource(source config.Source, item artifact) contract.Source {
 		SourceRef:                 contract.NewSourceRef(providerName, source.ID, item.threadID),
 	}
 	relationships := []contract.Relationship{}
+	omissions := []contract.Omission{}
 	if item.meta.ParentThreadID != "" {
-		relationships = append(relationships, contract.Relationship{Kind: "parent", SourceRef: contract.NewSourceRef(providerName, source.ID, strings.ToLower(item.meta.ParentThreadID))})
+		if parentID, ok := canonicalThreadID(item.meta.ParentThreadID); ok {
+			relationships = append(relationships, contract.Relationship{Kind: "parent", SourceRef: contract.NewSourceRef(providerName, source.ID, parentID)})
+		} else {
+			omissions = append(omissions, omission("malformed_record", "relationship", "A Codex relationship identifier was invalid."))
+		}
 	}
 	if item.meta.ForkedFromID != "" {
-		relationships = append(relationships, contract.Relationship{Kind: "forked_from", SourceRef: contract.NewSourceRef(providerName, source.ID, strings.ToLower(item.meta.ForkedFromID))})
+		if forkedFromID, ok := canonicalThreadID(item.meta.ForkedFromID); ok {
+			relationships = append(relationships, contract.Relationship{Kind: "forked_from", SourceRef: contract.NewSourceRef(providerName, source.ID, forkedFromID)})
+		} else {
+			omissions = append(omissions, omission("malformed_record", "relationship", "A Codex relationship identifier was invalid."))
+		}
 	}
 	hintInput := strconv.FormatInt(item.size, 10) + "\x00" + strconv.FormatInt(item.modTime.UnixNano(), 10)
 	hintHash := sha256.Sum256([]byte("agent-sessions:codex-version-hint:v0\x00" + hintInput))
@@ -335,7 +353,14 @@ func makeSource(source config.Source, item artifact) contract.Source {
 		VersionHint:   &contract.VersionHint{Kind: "stat_hash", Value: "sha256:" + hex.EncodeToString(hintHash[:])},
 		Relationships: relationships,
 		Metadata:      []contract.Metadata{},
+	}, omissions
+}
+
+func canonicalThreadID(value string) (string, bool) {
+	if !threadIDPattern.MatchString(value) {
+		return "", false
 	}
+	return strings.ToLower(value), true
 }
 
 func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event, []contract.Omission) {
@@ -347,11 +372,9 @@ func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event,
 		switch line.Type {
 		case "event_msg":
 			var event struct {
-				Type     string          `json:"type"`
-				Message  string          `json:"message"`
-				CallID   string          `json:"call_id"`
-				ExitCode *int            `json:"exit_code"`
-				Item     json.RawMessage `json:"item"`
+				Type    string          `json:"type"`
+				Message string          `json:"message"`
+				Item    json.RawMessage `json:"item"`
 			}
 			if json.Unmarshal(line.Payload, &event) != nil {
 				continue
@@ -367,14 +390,6 @@ func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event,
 				}
 			case "error":
 				events = append(events, contract.Event{Kind: contract.EventError, Error: &contract.ErrorEvent{Category: "provider", Message: event.Message}, Metadata: []contract.Metadata{}})
-			case "exec_command_end":
-				if normalized, ok := calls[event.CallID]; ok && normalized != "" {
-					success := event.ExitCode != nil && *event.ExitCode == 0
-					events = append(events, contract.Event{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: normalized, Success: success, ExitCode: event.ExitCode}, Metadata: []contract.Metadata{}})
-					delete(calls, event.CallID)
-				} else {
-					omissions = append(omissions, omission("correlation_omitted", "events", "A tool result did not reference an earlier unique call."))
-				}
 			case "item_completed":
 				if historyMode == "paginated" {
 					var item struct {
@@ -390,9 +405,24 @@ func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event,
 					}
 					switch item.Type {
 					case "UserMessage":
-						events = append(events, messageEvent("user", joinContent(item.Content)))
+						text, hasText, contentOmission := normalizeUserContent(item.Content)
+						if hasText {
+							events = append(events, messageEvent("user", text))
+						}
+						if contentOmission != "" {
+							message := "A message contained content that is not represented by the public text model."
+							if contentOmission == "unknown_format" {
+								message = "A message content type was not recognized."
+							}
+							omissions = append(omissions, omission(contentOmission, "events", message))
+						}
 					case "AgentMessage":
-						events = append(events, messageEvent("assistant", joinContent(item.Content)))
+						text, validContent := normalizeAgentContent(item.Content)
+						if validContent {
+							events = append(events, messageEvent("assistant", text))
+						} else {
+							omissions = append(omissions, omission("unknown_format", "events", "An assistant message content type was not recognized."))
+						}
 					case "CommandExecution", "McpToolCall", "DynamicToolCall":
 						if item.ID == "" {
 							omissions = append(omissions, omission("correlation_omitted", "events", "A completed tool item lacked a correlation identifier."))
@@ -409,7 +439,9 @@ func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event,
 						success := item.Status == "completed" || item.ExitCode != nil && *item.ExitCode == 0
 						events = append(events, contract.Event{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: callID, Success: success, ExitCode: item.ExitCode}, Metadata: []contract.Metadata{}})
 					default:
-						if !knownTurnItemType(item.Type) {
+						if knownTurnItemType(item.Type) {
+							omissions = append(omissions, omission("unsupported_event", "events", "A recognized Codex item is not represented by the public event model."))
+						} else {
 							omissions = append(omissions, omission("unknown_format", "events", "A completed Codex item type was not recognized."))
 						}
 					}
@@ -427,7 +459,8 @@ func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event,
 			if json.Unmarshal(line.Payload, &item) != nil {
 				continue
 			}
-			if item.Type == "function_call" || item.Type == "custom_tool_call" || item.Type == "local_shell_call" {
+			switch item.Type {
+			case "function_call", "custom_tool_call", "local_shell_call":
 				if item.CallID == "" {
 					omissions = append(omissions, omission("correlation_omitted", "events", "A tool call lacked a correlation identifier."))
 					continue
@@ -446,7 +479,19 @@ func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event,
 					category = "file_change"
 				}
 				events = append(events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category}, Metadata: []contract.Metadata{}})
+			case "function_call_output", "custom_tool_call_output":
+				if normalized, ok := calls[item.CallID]; ok && normalized != "" {
+					omissions = append(omissions, omission("unsupported_tool_result", "events", "A correlated tool result did not expose a safe success value."))
+					delete(calls, item.CallID)
+				} else {
+					omissions = append(omissions, omission("correlation_omitted", "events", "A tool result did not reference an earlier unique call."))
+				}
 			}
+		}
+	}
+	for _, normalized := range calls {
+		if normalized != "" {
+			omissions = append(omissions, omission("correlation_omitted", "events", "A tool call did not have a safely correlated persisted result."))
 		}
 	}
 	if len(events) > maxNormalizedEvents {
@@ -525,7 +570,7 @@ func knownTurnItemType(value string) bool {
 
 func knownTopLevel(value string) bool {
 	switch value {
-	case "session_meta", "response_item", "event_msg", "turn_context", "compacted", "token_count", "token_usage_record", "world_state", "inter_agent_communication", "inter_agent_communication_metadata", "retained_context", "security_risk_score", "realtime_item":
+	case "session_meta", "response_item", "event_msg", "inter_agent_communication", "inter_agent_communication_metadata", "compacted", "turn_context", "world_state", "security_risk_score":
 		return true
 	default:
 		return false
@@ -534,7 +579,7 @@ func knownTopLevel(value string) bool {
 
 func knownEventType(value string) bool {
 	switch value {
-	case "user_message", "agent_message", "error", "exec_command_end", "item_completed", "task_started", "turn_started", "task_complete", "turn_complete", "turn_aborted", "token_count", "thread_rolled_back", "thread_settings_applied", "context_compacted", "agent_reasoning", "agent_reasoning_raw_content", "mcp_tool_call_end", "web_search_end", "image_generation_end", "entered_review_mode", "exited_review_mode", "sub_agent_activity":
+	case "user_message", "agent_message", "error", "item_completed", "task_started", "turn_started", "task_complete", "turn_complete", "turn_aborted", "token_count", "thread_rolled_back", "thread_settings_applied", "context_compacted", "agent_reasoning", "agent_reasoning_raw_content", "mcp_tool_call_end", "web_search_end", "image_generation_end", "entered_review_mode", "exited_review_mode", "sub_agent_activity":
 		return true
 	default:
 		return false
@@ -545,14 +590,39 @@ func messageEvent(role, text string) contract.Event {
 	return contract.Event{Kind: contract.EventMessage, Message: &contract.MessageEvent{Role: role, Text: text}, Metadata: []contract.Metadata{}}
 }
 
-func joinContent(content []struct{ Type, Text string }) string {
+func normalizeAgentContent(content []struct{ Type, Text string }) (string, bool) {
 	parts := []string{}
 	for _, item := range content {
-		if (item.Type == "text" || item.Type == "Text" || item.Type == "input_text" || item.Type == "output_text") && item.Text != "" {
+		if item.Type != "Text" {
+			return "", false
+		}
+		if item.Text != "" {
 			parts = append(parts, item.Text)
 		}
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n"), true
+}
+
+func normalizeUserContent(content []struct{ Type, Text string }) (string, bool, string) {
+	parts := []string{}
+	hasText := false
+	omissionCode := ""
+	for _, item := range content {
+		switch item.Type {
+		case "text":
+			hasText = true
+			if item.Text != "" {
+				parts = append(parts, item.Text)
+			}
+		case "image", "local_image", "audio", "local_audio", "skill", "mention":
+			if omissionCode == "" {
+				omissionCode = "unsupported_content"
+			}
+		default:
+			omissionCode = "unknown_format"
+		}
+	}
+	return strings.Join(parts, "\n"), hasText, omissionCode
 }
 
 func normalizedCallID(threadID, providerCallID string) string {

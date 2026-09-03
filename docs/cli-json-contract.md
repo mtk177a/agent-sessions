@@ -93,6 +93,9 @@ A `complete` response cannot contain omissions or an error.\
 A `partial` response contains at least one omission.\
 Unknown provider shapes and values whose output safety cannot be established must not produce `complete`.
 
+For `list`, multiple adapter results are aggregated independently of adapter order.\
+If every observed adapter result is unsupported, the response is `unsupported`; if an unsupported omission is combined with any complete or partial observation, the response is `partial`.
+
 Pagination with `has_more: true` returns `partial`, an omission with code `pagination`, and a versioned `next_cursor`.\
 Cursor contents are opaque to consumers.
 
@@ -128,6 +131,8 @@ Configuration is strict JSON:
 Provider and source instance IDs match `[a-z][a-z0-9-]{0,62}`.\
 Source instance IDs are unique within one provider, roots are absolute, and unknown fields are rejected.
 
+The `list --source-instance` and `list --root` options require `--provider` because source instance IDs and roots are provider-scoped.
+
 Resolution precedence is:
 
 1. `--root` command-line override;
@@ -153,6 +158,10 @@ It does not create or update that file.
 | Encoded response | 8 MiB |
 
 Truncated dynamic output adds a `resource_truncation` omission and cannot remain complete.
+
+Free-form strings are truncated only at a valid UTF-8 boundary.\
+An oversized raw provider-native source ID is omitted while its fingerprint and source reference remain available.\
+Oversized structural identifiers fail closed with a structured resource error instead of being truncated into a different identity.
 
 ## Final redaction
 

@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	credentialPattern  = regexp.MustCompile(`(?i)(?:authorization\s*[:=]\s*(?:bearer\s+)?|(?:api[_-]?key|token|password|secret)\s*[:=]\s*)[^\s,;"']+|\b(?:sk|ghp|github_pat)-[A-Za-z0-9_-]{8,}\b`)
+	credentialPattern  = regexp.MustCompile(`(?i)(?:authorization\s*[:=]\s*(?:(?:basic|bearer)\s+)?|(?:api[_-]?key|token|password|secret)\s*[:=]\s*)["']?[^\s,;"']+["']?|\b(?:sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,})\b`)
 	fileURIPattern     = regexp.MustCompile(`(?i)file://[^\s"']+`)
 	windowsPathPattern = regexp.MustCompile(`(?i)(?:[a-z]:\\|\\\\)[^\s"']*`)
 	unixPathPattern    = regexp.MustCompile(`(?:^|[\s("'])/(?:[^\s/"']+/)*[^\s/)"']+`)

@@ -285,6 +285,9 @@ If an official operation performs metadata repair, migration, synchronization, o
 
 File system parsing is an acceptable fallback when needed to preserve the stronger read-only contract.
 
+File-backed adapters open only bounded regular files.\
+The core rejects special files without blocking and rechecks the opened file identity, resolved path containment, and provider-root identity before reading so a path replacement cannot escape the configured source boundary.
+
 Provider-internal formats are version-sensitive inputs and are not automatically promoted to public `agent-sessions` contracts.
 
 ### Codex
@@ -444,6 +447,9 @@ The public result model must distinguish at least the following states:
 
 Bounded output and pagination must be explicit.\
 A truncated result must not silently appear complete.
+
+When `list` combines providers, aggregation is order-independent.\
+All-unsupported observations remain `unsupported`, while usable observations combined with unsupported omissions are `partial`.
 
 ## Security and privacy
 

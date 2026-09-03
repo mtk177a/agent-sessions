@@ -22,7 +22,7 @@ The result is one standalone executable with no external Go module dependencies.
 The machine-readable interface consists of four operations:
 
 ```text
-agent-sessions list [--provider ID] [--source-instance ID] [--root PATH]
+agent-sessions list [--provider ID [--source-instance ID] [--root PATH]]
 agent-sessions show [--root PATH] <source-ref>
 agent-sessions events [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
 agent-sessions verify [--root PATH] <source-ref>
@@ -33,6 +33,8 @@ The JSON schema is provisional until the Codex and Claude Code adapters validate
 
 The current production registry contains no provider adapters.\
 `list` therefore returns an empty complete result unless a future adapter is registered, and selecting an unavailable provider returns `unsupported`.
+
+For `list`, `--source-instance` and `--root` are provider-scoped selectors and require `--provider`.
 
 See [CLI JSON contract](docs/cli-json-contract.md) for fields, pagination, bounds, exit codes, completeness, and redaction behavior.
 

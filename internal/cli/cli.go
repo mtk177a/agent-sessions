@@ -65,7 +65,7 @@ func (r Runner) runList(ctx context.Context, args []string, output io.Writer) in
 	root := flags.String("root", "", "provider root")
 	limit := flags.Int("limit", DefaultPageLimit, "page size")
 	cursor := flags.String("cursor", "", "page cursor")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *root != "" && *providerName == "" {
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || (*root != "" || *instance != "") && *providerName == "" {
 		return r.writeError(output, "list", ExitUsage, "invalid_arguments", "usage", "The list arguments are invalid.")
 	}
 	offset, err := parsePage(*limit, *cursor)
@@ -88,7 +88,7 @@ func (r Runner) runList(ctx context.Context, args []string, output io.Writer) in
 	}
 	sources := []contract.Source{}
 	omissions := []contract.Omission{}
-	status := contract.StatusComplete
+	status := contract.Status("")
 	for _, adapter := range adapters {
 		instances, err := config.ResolveAll(adapter.Name(), *root, *instance, configured, adapter)
 		if err != nil {
@@ -99,6 +99,14 @@ func (r Runner) runList(ctx context.Context, args []string, output io.Writer) in
 			if result.Err != nil {
 				return r.writeProviderError(output, "list", result.Err)
 			}
+			if err := validateProviderResultStatus(result.Status, result.Omissions, len(result.Sources)); err != nil {
+				return r.writeError(output, "list", ExitFailure, "invalid_provider_result", "provider", "The provider returned an invalid source result.")
+			}
+			if result.Status == contract.StatusUnsupported {
+				omissions = append(omissions, result.Omissions...)
+				status = mergeStatus(status, result.Status)
+				continue
+			}
 			if err := validateSources(result.Sources, adapter.Name(), sourceInstance.ID); err != nil {
 				return r.writeError(output, "list", ExitFailure, "invalid_provider_result", "provider", "The provider returned an invalid source result.")
 			}
@@ -106,6 +114,12 @@ func (r Runner) runList(ctx context.Context, args []string, output io.Writer) in
 			omissions = append(omissions, result.Omissions...)
 			status = mergeStatus(status, result.Status)
 		}
+	}
+	if status == "" {
+		status = contract.StatusComplete
+	}
+	if status == contract.StatusUnsupported && len(sources) == 0 {
+		return r.writeUnsupportedResult(output, "list", omissions)
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Identity.SourceRef < sources[j].Identity.SourceRef })
 	page, next, pageOmission, err := paginateSources(sources, offset, *limit)
@@ -135,6 +149,12 @@ func (r Runner) runShow(ctx context.Context, args []string, output io.Writer) in
 	result := adapter.Show(ctx, sourceInstance, parsed.Fingerprint)
 	if result.Err != nil {
 		return r.writeProviderError(output, "show", result.Err)
+	}
+	if err := validateProviderResultStatus(result.Status, result.Omissions, len(result.Sources)); err != nil {
+		return r.writeError(output, "show", ExitFailure, "invalid_provider_result", "provider", "The provider returned an invalid source result.")
+	}
+	if result.Status == contract.StatusUnsupported {
+		return r.writeUnsupportedResult(output, "show", result.Omissions)
 	}
 	if len(result.Sources) != 1 {
 		return r.writeError(output, "show", ExitFailure, "invalid_provider_result", "provider", "The provider returned an invalid source result.")
@@ -177,6 +197,12 @@ func (r Runner) runEvents(ctx context.Context, args []string, output io.Writer) 
 	if result.Err != nil {
 		return r.writeProviderError(output, "events", result.Err)
 	}
+	if err := validateProviderResultStatus(result.Status, result.Omissions, len(result.Events)); err != nil {
+		return r.writeError(output, "events", ExitFailure, "invalid_provider_result", "provider", "The provider returned invalid normalized events.")
+	}
+	if result.Status == contract.StatusUnsupported {
+		return r.writeUnsupportedResult(output, "events", result.Omissions)
+	}
 	if len(result.Events) > MaxEventCount {
 		return r.writeError(output, "events", ExitFailure, "event_limit_exceeded", "resource", "The source exceeds the event count limit.")
 	}
@@ -212,6 +238,12 @@ func (r Runner) runVerify(ctx context.Context, args []string, output io.Writer) 
 	result := adapter.Evidence(ctx, sourceInstance, parsed.Fingerprint)
 	if result.Err != nil {
 		return r.writeProviderError(output, "verify", result.Err)
+	}
+	if err := validateProviderResultStatus(result.Status, result.Omissions, len(result.Chunks)); err != nil {
+		return r.writeError(output, "verify", ExitFailure, "invalid_provider_result", "provider", "The provider returned invalid verification evidence.")
+	}
+	if result.Status == contract.StatusUnsupported {
+		return r.writeUnsupportedResult(output, "verify", result.Omissions)
 	}
 	verified, err := contract.VerifiedVersion(result.Chunks)
 	if err != nil {
@@ -274,8 +306,12 @@ func (r Runner) writeProviderError(output io.Writer, operation string, err error
 }
 
 func (r Runner) writeUnsupported(output io.Writer, operation, code, message string) int {
+	return r.writeUnsupportedResult(output, operation, []contract.Omission{{Code: code, Scope: "operation", Message: message}})
+}
+
+func (r Runner) writeUnsupportedResult(output io.Writer, operation string, omissions []contract.Omission) int {
 	envelope := contract.NewEnvelope(operation, r.Version, contract.StatusUnsupported)
-	envelope.Omissions = []contract.Omission{{Code: code, Scope: "operation", Message: message}}
+	envelope.Omissions = append([]contract.Omission{}, omissions...)
 	return r.write(output, envelope, ExitUnsupported)
 }
 
@@ -289,17 +325,21 @@ func (r Runner) write(output io.Writer, envelope contract.Envelope, exit int) in
 	if envelope.Status == contract.StatusComplete && len(envelope.Omissions) > 0 {
 		envelope.Status = contract.StatusPartial
 	}
-	contract.EnforceBounds(&envelope)
-	contract.Finalize(&envelope)
-	if err := envelope.Validate(); err != nil {
-		envelope = contract.NewEnvelope(envelope.Operation, r.Version, contract.StatusError)
-		envelope.Error = &contract.PublicError{Code: "invalid_result", Category: "internal", Message: "The operation produced an invalid result.", Details: []contract.ErrorDetail{}}
+	if err := prepareEnvelope(&envelope); err != nil {
+		code := "invalid_result"
+		category := "internal"
+		message := "The operation produced an invalid result."
+		if errors.Is(err, contract.ErrStructuralStringBound) {
+			code = "output_bound_exceeded"
+			category = "resource"
+			message = "The operation produced a structural value outside the output bounds."
+		}
+		envelope = r.fallbackEnvelope(envelope.Operation, code, category, message)
 		exit = ExitFailure
 	}
 	encoded, err := json.Marshal(envelope)
 	if err != nil || len(encoded) > MaxResponseBytes {
-		envelope = contract.NewEnvelope(envelope.Operation, r.Version, contract.StatusError)
-		envelope.Error = &contract.PublicError{Code: "response_limit_exceeded", Category: "resource", Message: "The response could not be encoded within the output limit.", Details: []contract.ErrorDetail{}}
+		envelope = r.fallbackEnvelope(envelope.Operation, "response_limit_exceeded", "resource", "The response could not be encoded within the output limit.")
 		encoded, _ = json.Marshal(envelope)
 		exit = ExitFailure
 	}
@@ -308,6 +348,26 @@ func (r Runner) write(output io.Writer, envelope contract.Envelope, exit int) in
 		return ExitFailure
 	}
 	return exit
+}
+
+func prepareEnvelope(envelope *contract.Envelope) error {
+	if err := contract.EnforceBounds(envelope); err != nil {
+		return err
+	}
+	contract.Finalize(envelope)
+	return envelope.Validate()
+}
+
+func (r Runner) fallbackEnvelope(operation, code, category, message string) contract.Envelope {
+	envelope := contract.NewEnvelope(operation, r.Version, contract.StatusError)
+	envelope.Error = &contract.PublicError{Code: code, Category: category, Message: message, Details: []contract.ErrorDetail{}}
+	if err := prepareEnvelope(&envelope); err == nil {
+		return envelope
+	}
+	envelope = contract.NewEnvelope("cli", "unknown", contract.StatusError)
+	envelope.Error = &contract.PublicError{Code: "invalid_result", Category: "internal", Message: "The operation produced an invalid result.", Details: []contract.ErrorDetail{}}
+	_ = prepareEnvelope(&envelope)
+	return envelope
 }
 
 func newFlagSet(name string) *flag.FlagSet {
@@ -364,13 +424,16 @@ func paginateEvents(values []contract.Event, offset, limit int) ([]contract.Even
 }
 
 func mergeStatus(current, next contract.Status) contract.Status {
-	if next == "" || next == contract.StatusComplete {
-		return current
-	}
-	if current == contract.StatusComplete {
+	if current == "" {
 		return next
 	}
-	return current
+	if next == "" || current == next {
+		return current
+	}
+	if current == contract.StatusPartial || next == contract.StatusPartial {
+		return contract.StatusPartial
+	}
+	return contract.StatusPartial
 }
 
 func exitForStatus(status contract.Status) int {
@@ -381,6 +444,26 @@ func exitForStatus(status contract.Status) int {
 		return ExitFailure
 	}
 	return ExitOK
+}
+
+func validateProviderResultStatus(status contract.Status, omissions []contract.Omission, payloadCount int) error {
+	switch status {
+	case contract.StatusComplete:
+		if len(omissions) != 0 {
+			return errors.New("complete provider result contains omissions")
+		}
+	case contract.StatusPartial:
+		if len(omissions) == 0 {
+			return errors.New("partial provider result lacks omissions")
+		}
+	case contract.StatusUnsupported:
+		if len(omissions) == 0 || payloadCount != 0 {
+			return errors.New("unsupported provider result is invalid")
+		}
+	default:
+		return errors.New("unknown provider result status")
+	}
+	return nil
 }
 
 func validateSources(sources []contract.Source, providerName, instance string) error {

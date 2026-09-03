@@ -6,28 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 )
 
 func DecodeJSONFile(path string, maxBytes int64, maxDepth int, target any) error {
-	file, err := os.Open(path)
+	data, err := readRegularFile(path, maxBytes)
 	if err != nil {
 		return err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New("input is not a regular file")
-	}
-	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
-	if err != nil {
-		return err
-	}
-	if int64(len(data)) > maxBytes {
-		return fmt.Errorf("input exceeds %d byte limit", maxBytes)
 	}
 	if err := validateDepth(data, maxDepth); err != nil {
 		return err

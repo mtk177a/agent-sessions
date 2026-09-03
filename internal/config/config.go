@@ -132,5 +132,8 @@ func ResolveAll(provider, override, overrideInstance string, configured Config, 
 	if err != nil {
 		return nil, err
 	}
+	if _, err := os.Stat(one.Root); errors.Is(err, os.ErrNotExist) {
+		return []Source{}, nil
+	}
 	return []Source{one}, nil
 }

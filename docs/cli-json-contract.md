@@ -78,6 +78,9 @@ Supported kinds are:
 - `tool_result`, with the related `call_id`, `success`, and optional `exit_code`;
 - `error`, with a safe `category` and redacted `message`.
 
+A tool result must reference one earlier unique tool call, and at most one normalized result may reference a call.\
+Provider adapters report duplicate, missing, or unmatched correlation as an omission instead of emitting an ambiguous event sequence.
+
 Raw commands and raw tool arguments are not part of the public event model.
 
 ## Completeness and omissions
@@ -139,6 +142,10 @@ Resolution precedence is:
 2. matching user configuration;
 3. provider environment;
 4. provider default.
+
+For `list`, an absent root selected only through provider environment or provider default contributes no source instance.\
+This allows provider-neutral discovery to return available providers without requiring every registered provider to be installed.\
+An explicit `--root` or configured root is authoritative, so an access failure for either remains an operation error.
 
 `--config` selects an explicit configuration file.\
 It does not create or update that file.

@@ -4,8 +4,8 @@
 
 It discovers provider-owned interaction records, exposes them through a normalized machine-readable interface, and leaves interpretation and durable processing state to downstream consumers.
 
-> Status: provider-neutral CLI core implemented with a provisional `v0alpha1` JSON contract.\
-> Production Codex and Claude Code adapters are not implemented yet, so the current binary does not discover provider sessions.
+> Status: provider-neutral CLI core and the read-only Codex adapter are implemented with a provisional `v0alpha1` JSON contract.\
+> The Claude Code adapter is not implemented yet.
 
 ## Build
 
@@ -31,8 +31,8 @@ agent-sessions verify [--root PATH] <source-ref>
 All operations emit one JSON object to standard output.\
 The JSON schema is provisional until the Codex and Claude Code adapters validate the common model.
 
-The current production registry contains no provider adapters.\
-`list` therefore returns an empty complete result unless a future adapter is registered, and selecting an unavailable provider returns `unsupported`.
+The production registry contains the `codex` provider adapter.\
+It discovers provider-owned rollout artifacts directly without starting the Codex App Server or writing persistent state.
 
 For `list`, `--source-instance` and `--root` are provider-scoped selectors and require `--provider`.
 
@@ -57,7 +57,8 @@ The core goals are:
 ### Read-only
 
 Provider-owned interaction records remain the source of truth.\
-Read operations must not modify provider history, provider metadata, or consumer state.
+Read operations do not write provider history, provider application metadata, or consumer state.\
+The host file system may update access-time metadata as a consequence of reading a provider file.
 
 A provider's official interface is preferred when it satisfies this contract.\
 When it does not provide a sufficiently strict read-only path, a safer supported access path may be used instead.
@@ -89,12 +90,12 @@ Complete transcripts are not copied into `agent-sessions` storage.
 
 Consumers that require durable evidence after a provider removes or changes a source are responsible for retaining the minimum derived evidence needed for their own use case.
 
-## Planned source support
+## Source support
 
 Primary sources:
 
-- Codex
-- Claude Code
+- Codex: implemented for the compatibility boundary documented in [Codex provider](docs/codex.md)
+- Claude Code: planned
 
 Additional compatible sources may include exported chat archives such as ChatGPT Data Export.
 
@@ -230,6 +231,7 @@ These capabilities belong to downstream consumers or separate systems.
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Codex provider](docs/codex.md)
 - [ADR 0001: Use stateless, read-only source access](docs/decisions/0001-use-stateless-read-only-source-access.md)
 - [ADR 0002: Model provider sources as named instances](docs/decisions/0002-model-provider-sources-as-named-instances.md)
 - [ADR 0003: Separate provider discovery from version-sensitive decoding](docs/decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md)

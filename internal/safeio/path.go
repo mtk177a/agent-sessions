@@ -8,10 +8,28 @@ import (
 )
 
 func ReadFileWithin(root, relative string, maxBytes int64) ([]byte, error) {
-	return readFileWithin(root, relative, maxBytes, openRegularNoFollow)
+	file, err := OpenRegularWithin(root, relative)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return ioReadAllLimit(file, maxBytes)
 }
 
 func readFileWithin(root, relative string, maxBytes int64, opener fileOpener) ([]byte, error) {
+	file, err := openRegularWithin(root, relative, opener)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return ioReadAllLimit(file, maxBytes)
+}
+
+func OpenRegularWithin(root, relative string) (*os.File, error) {
+	return openRegularWithin(root, relative, openRegularNoFollow)
+}
+
+func openRegularWithin(root, relative string, opener fileOpener) (*os.File, error) {
 	if filepath.IsAbs(relative) {
 		return nil, errors.New("relative path must not be absolute")
 	}
@@ -46,23 +64,21 @@ func readFileWithin(root, relative string, maxBytes int64, opener fileOpener) ([
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 	postRoot, err := filepath.EvalSymlinks(resolvedRoot)
 	if err != nil {
+		_ = file.Close()
 		return nil, err
 	}
 	postRootInfo, err := os.Stat(postRoot)
 	if err != nil || !os.SameFile(openedRootInfo, postRootInfo) {
+		_ = file.Close()
 		return nil, errors.New("provider root changed while opening")
 	}
 	if !pathWithin(postRoot, openedPath) {
+		_ = file.Close()
 		return nil, errors.New("path escapes provider root")
 	}
-	data, err := ioReadAllLimit(file, maxBytes)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return file, nil
 }
 
 func pathWithin(root, candidate string) bool {

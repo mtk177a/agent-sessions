@@ -4,8 +4,37 @@
 
 It discovers provider-owned interaction records, exposes them through a normalized machine-readable interface, and leaves interpretation and durable processing state to downstream consumers.
 
-> Status: design / pre-implementation.\
-> The public contracts are being defined before the initial implementation.
+> Status: provider-neutral CLI core implemented with a provisional `v0alpha1` JSON contract.\
+> Production Codex and Claude Code adapters are not implemented yet, so the current binary does not discover provider sessions.
+
+## Build
+
+Go 1.26 or later is required.
+
+```sh
+go build ./cmd/agent-sessions
+```
+
+The result is one standalone executable with no external Go module dependencies.
+
+## Commands
+
+The machine-readable interface consists of four operations:
+
+```text
+agent-sessions list [--provider ID] [--source-instance ID] [--root PATH]
+agent-sessions show [--root PATH] <source-ref>
+agent-sessions events [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
+agent-sessions verify [--root PATH] <source-ref>
+```
+
+All operations emit one JSON object to standard output.\
+The JSON schema is provisional until the Codex and Claude Code adapters validate the common model.
+
+The current production registry contains no provider adapters.\
+`list` therefore returns an empty complete result unless a future adapter is registered, and selecting an unavailable provider returns `unsupported`.
+
+See [CLI JSON contract](docs/cli-json-contract.md) for fields, pagination, bounds, exit codes, completeness, and redaction behavior.
 
 ## Goals
 
@@ -124,7 +153,23 @@ provider default
 Configuration should identify a provider-level home or equivalent source boundary whenever possible.\
 Knowledge of provider-internal session directories belongs in provider adapters rather than ordinary user configuration.
 
-The concrete configuration format and operating-system-specific configuration path will be defined with the initial implementation.
+The optional configuration file is strict JSON at the operating-system user configuration directory returned by Go's `os.UserConfigDir`, followed by `agent-sessions/config.json`.
+
+```json
+{
+  "schema_version": "v0alpha1",
+  "sources": [
+    {
+      "id": "codex-default",
+      "provider": "codex",
+      "root": "/fictional/provider-root"
+    }
+  ]
+}
+```
+
+Source roots must be absolute machine-local paths.\
+The example is illustrative; a configured source is usable only when its provider adapter is available.
 
 ## Consumer boundary
 
@@ -185,6 +230,20 @@ These capabilities belong to downstream consumers or separate systems.
 - [Architecture](docs/architecture.md)
 - [ADR 0001: Use stateless, read-only source access](docs/decisions/0001-use-stateless-read-only-source-access.md)
 - [ADR 0002: Model provider sources as named instances](docs/decisions/0002-model-provider-sources-as-named-instances.md)
+- [ADR 0003: Separate provider discovery from version-sensitive decoding](docs/decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md)
+- [CLI JSON contract](docs/cli-json-contract.md)
+
+## Development validation
+
+```sh
+gofmt -d cmd internal
+go test ./...
+mkdir -p dist
+GOOS=linux GOARCH=amd64 go build -o dist/agent-sessions-linux-amd64 ./cmd/agent-sessions
+GOOS=darwin GOARCH=amd64 go build -o dist/agent-sessions-darwin-amd64 ./cmd/agent-sessions
+GOOS=windows GOARCH=amd64 go build -o dist/agent-sessions-windows-amd64.exe ./cmd/agent-sessions
+git diff --check
+```
 
 ## License
 

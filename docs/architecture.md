@@ -121,7 +121,7 @@ The common model intentionally avoids forcing every provider to use the term `se
 
 A supported producer of interaction records.
 
-Initial provider adapters are expected for:
+Provider adapters are implemented or planned for:
 
 ```text
 codex
@@ -292,12 +292,15 @@ Provider-internal formats are version-sensitive inputs and are not automatically
 
 ### Codex
 
-The accepted boundary for the pending Codex adapter is the documented Codex home and the `sessions` and `archived_sessions` transcript locations.\
-The adapter will not start the Codex App Server for read-only inspection.
+The Codex adapter accepts the documented Codex home and discovers rollout artifacts below its `sessions` and `archived_sessions` locations.\
+It does not start the Codex App Server for read-only inspection.
 
 User configuration identifies the Codex home rather than an internal session directory.
 
 Multiple Codex homes or stores are represented by separate named source instances.
+
+Discovery reads only bounded rollout headers, while `events` and `verify` cross the separately maintained version-sensitive decoding boundary.\
+The accepted artifact and row compatibility evidence, normalization choices, and explicit limitations are documented in [Codex provider](codex.md).
 
 ### Claude Code
 
@@ -378,7 +381,7 @@ The implemented configuration expresses these concepts as strict JSON:
 }
 ```
 
-The locators are fictional examples, and the Codex adapter is not implemented yet.
+The locators are fictional examples.
 
 ## Statelessness and storage
 
@@ -507,8 +510,8 @@ No command implies that a downstream consumer has reviewed or accepted a source.
 
 The exact provisional fields, exit codes, pagination behavior, bounds, and final-redaction policy are documented in [CLI JSON contract](cli-json-contract.md).
 
-The current executable contains the provider-neutral core but no production provider adapters.\
-Codex and Claude Code discovery and event decoding remain pending adapter work, and the schema is not stable v1.
+The current executable contains the provider-neutral core and the production Codex adapter.\
+Claude Code discovery and event decoding remain pending, and the schema is not stable v1.
 
 ## Consumer responsibilities
 

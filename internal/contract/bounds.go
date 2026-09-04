@@ -9,6 +9,7 @@ const (
 	MaxStringBytes   = 64 << 10
 	MaxMetadata      = 64
 	MaxRelationships = 64
+	MaxJSONDepth     = 64
 )
 
 var ErrStructuralStringBound = errors.New("structural output string exceeds bound")

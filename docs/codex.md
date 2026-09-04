@@ -2,6 +2,9 @@
 
 The `codex` provider adapter reads Codex rollout artifacts directly from a Codex home without starting the Codex App Server.
 
+It maps the compatibility boundary below into the provider-neutral stable `v1` CLI contract.\
+The rollout JSONL format remains adapter-internal and is not part of that public schema.
+
 ## Discovery boundary
 
 Codex documents `$CODEX_HOME` as its data directory and uses `~/.codex` when that variable is unset.\

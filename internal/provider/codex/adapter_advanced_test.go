@@ -120,6 +120,31 @@ func TestUnverifiedTopLevelRowsDegradeCompleteness(t *testing.T) {
 	}
 }
 
+func TestDeepHeaderIsRejected(t *testing.T) {
+	home := t.TempDir()
+	deep := strings.Repeat(`{"x":`, contract.MaxJSONDepth) + `0` + strings.Repeat(`}`, contract.MaxJSONDepth)
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", `,"deep":`+deep)})
+
+	listed := New().List(context.Background(), testSource(home))
+	if listed.Status != contract.StatusUnsupported || len(listed.Sources) != 0 || !hasOmission(listed.Omissions, "malformed_record") {
+		t.Fatalf("List() = %#v", listed)
+	}
+}
+
+func TestDeepEventRowDegradesCompleteness(t *testing.T) {
+	home := t.TempDir()
+	deep := strings.Repeat(`{"x":`, contract.MaxJSONDepth) + `0` + strings.Repeat(`}`, contract.MaxJSONDepth)
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.149.1", "legacy", ""),
+		`{"type":"event_msg","payload":{"type":"user_message","message":"usable"},"deep":` + deep + `}`,
+	})
+
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusUnsupported || len(result.Events) != 0 || !hasOmission(result.Omissions, "malformed_record") {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
 func TestCorrelationFailuresArePartialAndNotGuessed(t *testing.T) {
 	home := t.TempDir()
 	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
@@ -303,7 +328,7 @@ func TestCLIUsesMultipleConfiguredCodexHomes(t *testing.T) {
 	writeRollout(t, rolloutPath(first, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", "")})
 	writeRollout(t, rolloutPath(second, "sessions", secondThreadID), []string{header(secondThreadID, "0.149.1", "legacy", "")})
 	configPath := filepath.Join(t.TempDir(), "config.json")
-	configJSON := fmt.Sprintf(`{"schema_version":"v0alpha1","sources":[{"id":"codex-one","provider":"codex","root":%q},{"id":"codex-two","provider":"codex","root":%q}]}`, first, second)
+	configJSON := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"codex-one","provider":"codex","root":%q},{"id":"codex-two","provider":"codex","root":%q}]}`, first, second)
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}

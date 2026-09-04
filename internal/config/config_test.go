@@ -25,11 +25,29 @@ func TestLoadRejectsDuplicateAndUnknownSources(t *testing.T) {
 	}
 
 	unknown := filepath.Join(dir, "unknown.json")
-	if err := os.WriteFile(unknown, []byte(`{"schema_version":"v0alpha1","extra":true,"sources":[]}`), 0o600); err != nil {
+	if err := os.WriteFile(unknown, []byte(`{"schema_version":"v1","extra":true,"sources":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(unknown, true); err == nil {
 		t.Fatal("unknown field was accepted")
+	}
+}
+
+func TestLoadRejectsUnsupportedSchemaVersions(t *testing.T) {
+	for _, version := range []string{"v0alpha1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			data, err := json.Marshal(Config{SchemaVersion: version, Sources: []Source{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path, true); err == nil {
+				t.Fatalf("schema version %q was accepted", version)
+			}
+		})
 	}
 }
 

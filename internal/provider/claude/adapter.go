@@ -75,9 +75,9 @@ type messagePayload struct {
 }
 
 type sidecarMeta struct {
-	ToolUseID    string `json:"toolUseId"`
+	ToolUseID     string `json:"toolUseId"`
 	ParentAgentID string `json:"parentAgentId"`
-	AgentType    string `json:"agentType"`
+	AgentType     string `json:"agentType"`
 }
 
 type contentBlock struct {
@@ -345,7 +345,7 @@ func inspectSidecar(root, relative string) (sidecarMeta, error) {
 		return sidecarMeta{}, err
 	}
 	var value map[string]json.RawMessage
-	if json.Unmarshal(data, &value) != nil || value == nil {
+	if safeio.DecodeJSON(data, contract.MaxJSONDepth, &value) != nil || value == nil {
 		return sidecarMeta{}, errors.New("invalid sidecar")
 	}
 	for _, name := range []string{"toolUseId", "parentAgentId", "agentType"} {
@@ -378,7 +378,7 @@ func readIdentity(root, relative string) (string, string, error) {
 			return "", "", errors.New("identity prefix exceeds limit")
 		}
 		var row transcriptRow
-		if json.Unmarshal(scanner.Bytes(), &row) != nil {
+		if safeio.DecodeJSON(scanner.Bytes(), contract.MaxJSONDepth, &row) != nil {
 			return "", "", errors.New("malformed identity row")
 		}
 		if !knownObservationRow(row.Type) {
@@ -447,7 +447,7 @@ func normalizeRows(sessionID string, data []byte) ([]contract.Event, []contract.
 	scanner.Buffer(make([]byte, 64<<10), maxRowBytes)
 	for scanner.Scan() {
 		var row transcriptRow
-		if json.Unmarshal(scanner.Bytes(), &row) != nil || row.Type == "" {
+		if safeio.DecodeJSON(scanner.Bytes(), contract.MaxJSONDepth, &row) != nil || row.Type == "" {
 			omissions = append(omissions, omission("malformed_record", "events", "A Claude JSONL row could not be decoded."))
 			continue
 		}

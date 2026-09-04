@@ -2,6 +2,9 @@
 
 The `claude` provider adapter reads Claude Code session records directly from a Claude Code configuration root without starting Claude Code.
 
+It maps the compatibility boundary below into the provider-neutral stable `v1` CLI contract.\
+The transcript JSONL format remains adapter-internal and is not part of that public schema.
+
 ## Discovery boundary
 
 Claude Code uses `~/.claude` as its default configuration directory and supports overriding that directory with `CLAUDE_CONFIG_DIR`.\

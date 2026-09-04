@@ -170,6 +170,33 @@ func TestDiscoveryDoesNotTakeIdentityFromUnknownOrMalformedRows(t *testing.T) {
 	}
 }
 
+func TestDeepIdentityRowIsRejected(t *testing.T) {
+	home := t.TempDir()
+	deep := strings.Repeat(`{"x":`, contract.MaxJSONDepth) + `0` + strings.Repeat(`}`, contract.MaxJSONDepth)
+	writeTranscript(t, home, "fictional-project", testSessionID, []string{
+		row("user", `{"role":"user","content":"not decoded"}`, `,"deep":`+deep),
+	})
+
+	listed := New().List(context.Background(), testSource(home))
+	if listed.Status != contract.StatusUnsupported || len(listed.Sources) != 0 || !hasOmission(listed.Omissions, "malformed_record") {
+		t.Fatalf("List() = %#v", listed)
+	}
+}
+
+func TestDeepEventRowDegradesCompleteness(t *testing.T) {
+	home := t.TempDir()
+	deep := strings.Repeat(`{"x":`, contract.MaxJSONDepth) + `0` + strings.Repeat(`}`, contract.MaxJSONDepth)
+	writeTranscript(t, home, "fictional-project", testSessionID, []string{
+		row("user", `{"role":"user","content":"usable"}`, ""),
+		row("assistant", `{"role":"assistant","content":"not decoded"}`, `,"deep":`+deep),
+	})
+
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 1 || !hasOmission(result.Omissions, "malformed_record") {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
 func TestBookkeepingRowsCannotHideIdentityOrVersionMismatch(t *testing.T) {
 	home := t.TempDir()
 	writeTranscript(t, home, "fictional-project", testSessionID, []string{
@@ -260,12 +287,14 @@ func TestSubagentOmissionsFollowOnlyTheirMainSource(t *testing.T) {
 }
 
 func TestMalformedAndOversizedSidecarsAreReported(t *testing.T) {
+	deep := []byte(strings.Repeat(`{"x":`, contract.MaxJSONDepth+1) + `0` + strings.Repeat(`}`, contract.MaxJSONDepth+1))
 	for _, tc := range []struct {
 		name string
 		data []byte
 		code string
 	}{
 		{name: "malformed", data: []byte(`{broken`), code: "malformed_record"},
+		{name: "deep", data: deep, code: "malformed_record"},
 		{name: "oversized", data: bytes.Repeat([]byte("x"), maxSidecarBytes+1), code: "resource_limit"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

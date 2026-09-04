@@ -27,7 +27,7 @@ func TestSyntheticFixtureExercisesStrictBoundedShape(t *testing.T) {
 	if err := safeio.DecodeJSONFile(filepath.Join("testdata", "synthetic-source.json"), 64<<20, 64, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.SchemaVersion != "v0alpha1" || len(fixture.Events) != 3 {
+	if fixture.SchemaVersion != "v1" || len(fixture.Events) != 3 {
 		t.Fatalf("unexpected fixture: %#v", fixture)
 	}
 }

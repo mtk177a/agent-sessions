@@ -285,7 +285,7 @@ func readSessionMeta(root, relative string) (sessionMeta, error) {
 		return sessionMeta{}, errors.New("header exceeds limit")
 	}
 	var outer rolloutLine
-	if err := json.Unmarshal(bytes.TrimSpace(line), &outer); err != nil || outer.Type != "session_meta" {
+	if err := safeio.DecodeJSON(bytes.TrimSpace(line), contract.MaxJSONDepth, &outer); err != nil || outer.Type != "session_meta" {
 		return sessionMeta{}, errors.New("invalid session metadata")
 	}
 	var meta sessionMeta
@@ -508,7 +508,7 @@ func inspectRows(historyMode string, data []byte) ([]rolloutLine, []contract.Omi
 	scanner.Buffer(make([]byte, 64<<10), maxRowBytes)
 	for scanner.Scan() {
 		var line rolloutLine
-		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
+		if err := safeio.DecodeJSON(scanner.Bytes(), contract.MaxJSONDepth, &line); err != nil {
 			omissions = append(omissions, omission("malformed_record", "events", "A Codex JSONL row could not be decoded."))
 			continue
 		}

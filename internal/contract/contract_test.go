@@ -79,6 +79,12 @@ func TestFinalizeRedactsEveryDynamicStringPosition(t *testing.T) {
 	errorEnvelope := NewEnvelope("list", "test", StatusError)
 	errorEnvelope.Error = &PublicError{Code: "provider_failure", Category: "provider", Message: unsafe, Details: []ErrorDetail{{Name: "diagnostic", Value: unsafe}, {Name: "raw_path", Value: "single-label-host"}}}
 	Finalize(&errorEnvelope)
+	if len(errorEnvelope.Omissions) == 0 || errorEnvelope.Omissions[len(errorEnvelope.Omissions)-1].Code != "output_redacted" {
+		t.Fatalf("error redaction omission = %#v", errorEnvelope.Omissions)
+	}
+	if err := errorEnvelope.Validate(); err != nil {
+		t.Fatalf("redacted error envelope is invalid: %v", err)
+	}
 	errorJSON := string(mustJSON(t, errorEnvelope))
 	for _, forbidden := range []string{"sk-fictional-secret", "/fictional", "host.example.invalid", "192.0.2.10", "single-label-host"} {
 		if strings.Contains(errorJSON, forbidden) {
@@ -182,6 +188,18 @@ func TestBoundsAndCompletenessInvariants(t *testing.T) {
 	invalid.Omissions = []Omission{{Code: "unknown_shape", Scope: "source", Message: "An unknown shape was omitted."}}
 	if err := invalid.Validate(); err == nil {
 		t.Fatal("complete result with an omission was accepted")
+	}
+}
+
+func TestEnvelopeRejectsUnsupportedSchemaVersions(t *testing.T) {
+	for _, version := range []string{"v0alpha1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			envelope := NewEnvelope("list", "test", StatusComplete)
+			envelope.SchemaVersion = version
+			if err := envelope.Validate(); err == nil {
+				t.Fatalf("schema version %q was accepted", version)
+			}
+		})
 	}
 }
 

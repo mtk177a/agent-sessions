@@ -8,6 +8,13 @@ import (
 	"io"
 )
 
+func DecodeJSON(data []byte, maxDepth int, target any) error {
+	if err := validateDepth(data, maxDepth); err != nil {
+		return err
+	}
+	return json.Unmarshal(data, target)
+}
+
 func DecodeJSONFile(path string, maxBytes int64, maxDepth int, target any) error {
 	data, err := readRegularFile(path, maxBytes)
 	if err != nil {

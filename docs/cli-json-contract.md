@@ -5,7 +5,7 @@
 The public response schema is stable `v1`.\
 The same contract is implemented by the production Codex and Claude Code adapters.
 
-Every response includes:
+The following is the smallest complete `list` response:
 
 ```json
 {
@@ -14,7 +14,13 @@ Every response includes:
   "redaction_policy_version": "v1",
   "operation": "list",
   "status": "complete",
-  "data": {},
+  "data": {
+    "sources": []
+  },
+  "page": {
+    "limit": 50,
+    "has_more": false
+  },
   "omissions": []
 }
 ```

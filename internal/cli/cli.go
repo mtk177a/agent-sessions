@@ -509,6 +509,7 @@ func validateSources(sources []contract.Source, providerName, instance string) e
 
 func normalizeAndValidateEvents(events []contract.Event) error {
 	calls := map[string]struct{}{}
+	results := map[string]struct{}{}
 	for i := range events {
 		event := &events[i]
 		event.Index = uint64(i)
@@ -548,6 +549,10 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 			if _, exists := calls[event.ToolResult.CallID]; !exists {
 				return errors.New("tool result does not reference an earlier call")
 			}
+			if _, exists := results[event.ToolResult.CallID]; exists {
+				return errors.New("duplicate tool result")
+			}
+			results[event.ToolResult.CallID] = struct{}{}
 		case contract.EventError:
 			if event.Error == nil || !contract.ValidToken(event.Error.Category) {
 				return errors.New("invalid error event")

@@ -463,3 +463,14 @@ func snapshot(t *testing.T, root string) map[string]int64 {
 	}
 	return result
 }
+
+func TestNormalizeAndValidateEventsRejectsDuplicateToolResults(t *testing.T) {
+	events := []contract.Event{
+		{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool"}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: false}, Metadata: []contract.Metadata{}},
+	}
+	if err := normalizeAndValidateEvents(events); err == nil {
+		t.Fatal("normalizeAndValidateEvents() accepted duplicate tool results")
+	}
+}

@@ -4,8 +4,7 @@
 
 It discovers provider-owned interaction records, exposes them through a normalized machine-readable interface, and leaves interpretation and durable processing state to downstream consumers.
 
-> Status: provider-neutral CLI core and the read-only Codex adapter are implemented with a provisional `v0alpha1` JSON contract.\
-> The Claude Code adapter is not implemented yet.
+> Status: the provider-neutral CLI core and read-only Codex and Claude Code adapters are implemented with a provisional `v0alpha1` JSON contract.
 
 ## Build
 
@@ -29,12 +28,14 @@ agent-sessions verify [--root PATH] <source-ref>
 ```
 
 All operations emit one JSON object to standard output.\
-The JSON schema is provisional until the Codex and Claude Code adapters validate the common model.
+The JSON schema remains provisional pending the separate stable-v1 compatibility work.
 
-The production registry contains the `codex` provider adapter.\
-It discovers provider-owned rollout artifacts directly without starting the Codex App Server or writing persistent state.
+The production registry contains the `codex` and `claude` provider adapters.\
+They discover provider-owned records directly without starting either provider application or writing persistent state.
 
 For `list`, `--source-instance` and `--root` are provider-scoped selectors and require `--provider`.
+When `list` uses provider environment or default roots, an absent implicit root contributes no sources and does not prevent results from other registered providers.\
+Explicit and configured roots remain authoritative and surface access failures.
 
 See [CLI JSON contract](docs/cli-json-contract.md) for fields, pagination, bounds, exit codes, completeness, and redaction behavior.
 
@@ -95,7 +96,7 @@ Consumers that require durable evidence after a provider removes or changes a so
 Primary sources:
 
 - Codex: implemented for the compatibility boundary documented in [Codex provider](docs/codex.md)
-- Claude Code: planned
+- Claude Code: implemented for the compatibility boundary documented in [Claude Code provider](docs/claude.md)
 
 Additional compatible sources may include exported chat archives such as ChatGPT Data Export.
 
@@ -232,6 +233,7 @@ These capabilities belong to downstream consumers or separate systems.
 
 - [Architecture](docs/architecture.md)
 - [Codex provider](docs/codex.md)
+- [Claude Code provider](docs/claude.md)
 - [ADR 0001: Use stateless, read-only source access](docs/decisions/0001-use-stateless-read-only-source-access.md)
 - [ADR 0002: Model provider sources as named instances](docs/decisions/0002-model-provider-sources-as-named-instances.md)
 - [ADR 0003: Separate provider discovery from version-sensitive decoding](docs/decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md)
@@ -242,6 +244,8 @@ These capabilities belong to downstream consumers or separate systems.
 ```sh
 gofmt -d cmd internal
 go test ./...
+go test -race ./...
+go vet ./...
 mkdir -p dist
 GOOS=linux GOARCH=amd64 go build -o dist/agent-sessions-linux-amd64 ./cmd/agent-sessions
 GOOS=darwin GOARCH=amd64 go build -o dist/agent-sessions-darwin-amd64 ./cmd/agent-sessions

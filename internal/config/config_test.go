@@ -86,6 +86,32 @@ func TestResolvePrecedence(t *testing.T) {
 	}
 }
 
+func TestResolveAllSkipsOnlyMissingImplicitRoots(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+
+	for _, defaults := range []fakeDefaults{
+		{environment: missing},
+		{fallback: missing},
+	} {
+		got, err := ResolveAll("synthetic", "", "", Config{}, defaults)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("missing implicit root resolved to %#v", got)
+		}
+	}
+
+	explicit, err := ResolveAll("synthetic", missing, "synthetic-default", Config{}, fakeDefaults{})
+	if err != nil || len(explicit) != 1 || explicit[0].Root != missing {
+		t.Fatalf("explicit root was skipped: %#v, %v", explicit, err)
+	}
+	configured, err := ResolveAll("synthetic", "", "", Config{Sources: []Source{{ID: "synthetic-default", Provider: "synthetic", Root: missing}}}, fakeDefaults{})
+	if err != nil || len(configured) != 1 || configured[0].Root != missing {
+		t.Fatalf("configured root was skipped: %#v, %v", configured, err)
+	}
+}
+
 type fakeDefaults struct {
 	environment string
 	fallback    string

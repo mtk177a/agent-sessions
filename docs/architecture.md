@@ -307,12 +307,20 @@ The accepted artifact and row compatibility evidence, normalization choices, and
 
 ### Claude Code
 
-The accepted boundary for the pending Claude Code adapter is its documented configuration root and project transcript location.\
-The adapter will read provider-owned session artifacts without modifying them.
+The Claude Code adapter accepts the documented configuration root and discovers main session transcripts below its `projects` location.\
+It reads provider-owned artifacts directly without starting Claude Code or modifying provider data or metadata.
 
 Multiple independently stored Claude Code roots are represented by separate named source instances.
 
 Provider configuration environment variables and documented defaults may supply the source location when explicit `agent-sessions` configuration is absent.
+
+Discovery uses the documented location contract and obtains logical identity from the transcript's provider-owned `sessionId`, not from its path.\
+The JSONL row and content-block shapes remain a separately maintained version-sensitive decoding boundary.
+
+Documented subagent transcript locations and version-specific metadata sidecars are recognized and validated within the provider root.\
+They are not exposed as independent sources because the verified records do not provide a provider-owned subagent identity that satisfies the common identity contract.
+
+The accepted location evidence, version-specific record compatibility, normalization choices, and limitations are documented in [Claude Code provider](claude.md).
 
 ### Exported chat archives
 
@@ -456,6 +464,8 @@ A truncated result must not silently appear complete.
 
 When `list` combines providers, aggregation is order-independent.\
 All-unsupported observations remain `unsupported`, while usable observations combined with unsupported omissions are `partial`.
+An absent provider environment or default root contributes no sources to combined discovery.\
+Explicit and configured roots remain authoritative and are not silently skipped.
 
 ## Security and privacy
 
@@ -513,8 +523,8 @@ No command implies that a downstream consumer has reviewed or accepted a source.
 
 The exact provisional fields, exit codes, pagination behavior, bounds, and final-redaction policy are documented in [CLI JSON contract](cli-json-contract.md).
 
-The current executable contains the provider-neutral core and the production Codex adapter.\
-Claude Code discovery and event decoding remain pending, and the schema is not stable v1.
+The current executable contains the provider-neutral core and the production Codex and Claude Code adapters.\
+The schema remains provisional; stable-v1 compatibility is separate work.
 
 ## Consumer responsibilities
 

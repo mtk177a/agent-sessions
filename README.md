@@ -4,7 +4,7 @@
 
 It discovers provider-owned interaction records, exposes them through a normalized machine-readable interface, and leaves interpretation and durable processing state to downstream consumers.
 
-> Status: the provider-neutral CLI core and read-only Codex and Claude Code adapters are implemented with a provisional `v0alpha1` JSON contract.
+> Status: the provider-neutral CLI core and read-only Codex and Claude Code adapters implement the stable `v1` JSON contract.
 
 ## Build
 
@@ -15,6 +15,16 @@ go build ./cmd/agent-sessions
 ```
 
 The result is one standalone executable with no external Go module dependencies.
+
+## Local installation
+
+From a repository checkout, install the executable into the active Go binary directory:
+
+```sh
+go install ./cmd/agent-sessions
+```
+
+The installation uses `GOBIN` when set and otherwise uses the Go toolchain's default binary directory.
 
 ## Commands
 
@@ -27,8 +37,8 @@ agent-sessions events [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
 agent-sessions verify [--root PATH] <source-ref>
 ```
 
-All operations emit one JSON object to standard output.\
-The JSON schema remains provisional pending the separate stable-v1 compatibility work.
+All operations emit one stable `v1` JSON object to standard output.\
+Consumers must check `schema_version` before interpreting any other response field.
 
 The production registry contains the `codex` and `claude` provider adapters.\
 They discover provider-owned records directly without starting either provider application or writing persistent state.
@@ -38,6 +48,28 @@ When `list` uses provider environment or default roots, an absent implicit root 
 Explicit and configured roots remain authoritative and surface access failures.
 
 See [CLI JSON contract](docs/cli-json-contract.md) for fields, pagination, bounds, exit codes, completeness, and redaction behavior.
+
+## Basic usage
+
+Discover sources from both installed providers, or select one provider explicitly:
+
+```sh
+agent-sessions list
+agent-sessions list --provider codex
+agent-sessions list --provider claude
+```
+
+Read the `identity.source_ref` value from a `list` response and pass it unchanged to the source operations:
+
+```sh
+source_ref='as0:provider:source-instance:fingerprint-from-list'
+agent-sessions show "$source_ref"
+agent-sessions events "$source_ref"
+agent-sessions verify "$source_ref"
+```
+
+`events` supports `--limit` and an opaque `--cursor` returned by the previous page.\
+Nonstandard roots and multiple stores can be selected with `--root`, `--source-instance`, or the machine-local configuration described below.
 
 ## Goals
 
@@ -81,9 +113,9 @@ Cache removal must affect performance only, not correctness.
 
 ### No background activity
 
-The initial architecture requires no daemon, watcher, timer, or periodic synchronization process.\
-When `agent-sessions` is not running, it should consume no CPU, memory, or disk I/O.\
-Read-only commands should cause no persistent `agent-sessions` writes.
+The architecture requires no daemon, watcher, timer, or periodic synchronization process.\
+When `agent-sessions` is not running, it consumes no CPU, memory, or disk I/O.\
+Read-only commands cause no persistent `agent-sessions` writes.
 
 ### Provider-owned raw data
 
@@ -93,15 +125,10 @@ Consumers that require durable evidence after a provider removes or changes a so
 
 ## Source support
 
-Primary sources:
+Supported providers:
 
 - Codex: implemented for the compatibility boundary documented in [Codex provider](docs/codex.md)
 - Claude Code: implemented for the compatibility boundary documented in [Claude Code provider](docs/claude.md)
-
-Additional compatible sources may include exported chat archives such as ChatGPT Data Export.
-
-Coding-agent sessions remain the primary product domain.\
-Additional source types do not redefine the core scope.
 
 ## Source model
 
@@ -133,14 +160,13 @@ See [Architecture](docs/architecture.md) for the detailed model.
 
 ## Configuration
 
-Common single-source environments should work without `agent-sessions` configuration.
+Common single-source environments work without `agent-sessions` configuration.
 
 Explicit configuration is intended for cases such as:
 
 - multiple homes or stores for one provider;
 - nonstandard provider homes;
-- mounted provider data;
-- explicitly supplied export archives.
+- mounted provider data.
 
 Resolution follows this precedence:
 
@@ -154,14 +180,14 @@ provider environment
 provider default
 ```
 
-Configuration should identify a provider-level home or equivalent source boundary whenever possible.\
+Configuration identifies a provider-level home or equivalent source boundary whenever possible.\
 Knowledge of provider-internal session directories belongs in provider adapters rather than ordinary user configuration.
 
 The optional configuration file is strict JSON at the operating-system user configuration directory returned by Go's `os.UserConfigDir`, followed by `agent-sessions/config.json`.
 
 ```json
 {
-  "schema_version": "v0alpha1",
+  "schema_version": "v1",
   "sources": [
     {
       "id": "codex-default",
@@ -242,7 +268,7 @@ These capabilities belong to downstream consumers or separate systems.
 ## Development validation
 
 ```sh
-gofmt -d cmd internal
+test -z "$(gofmt -l cmd internal)"
 go test ./...
 go test -race ./...
 go vet ./...

@@ -303,7 +303,7 @@ func TestCLIUsesMultipleConfiguredCodexHomes(t *testing.T) {
 	writeRollout(t, rolloutPath(first, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", "")})
 	writeRollout(t, rolloutPath(second, "sessions", secondThreadID), []string{header(secondThreadID, "0.149.1", "legacy", "")})
 	configPath := filepath.Join(t.TempDir(), "config.json")
-	configJSON := fmt.Sprintf(`{"schema_version":"v0alpha1","sources":[{"id":"codex-one","provider":"codex","root":%q},{"id":"codex-two","provider":"codex","root":%q}]}`, first, second)
+	configJSON := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"codex-one","provider":"codex","root":%q},{"id":"codex-two","provider":"codex","root":%q}]}`, first, second)
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	SchemaVersion          = "v0alpha1"
-	RedactionPolicyVersion = "v0alpha1"
+	SchemaVersion          = "v1"
+	RedactionPolicyVersion = "v1"
 )
 
 type Status string

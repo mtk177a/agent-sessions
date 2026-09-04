@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -18,7 +20,7 @@ import (
 func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	configJSON := `{"schema_version":"v0alpha1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
+	configJSON := `{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +56,9 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 			}
 			if envelope.Operation != tc.wantOperation || envelope.Status != tc.wantStatus {
 				t.Fatalf("unexpected envelope: %#v", envelope)
+			}
+			if envelope.SchemaVersion != "v1" || envelope.RedactionPolicyVersion != "v1" || envelope.Omissions == nil {
+				t.Fatalf("stable envelope fields are missing: %#v", envelope)
 			}
 			switch tc.name {
 			case "list":
@@ -129,7 +134,7 @@ func TestStructuredErrorsAndExitCodes(t *testing.T) {
 func TestUnsupportedAdapterResultForEveryOperation(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	configJSON := `{"schema_version":"v0alpha1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
+	configJSON := `{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +301,7 @@ func TestStructuralOutputBoundFailsClosed(t *testing.T) {
 func TestEventsRejectEventCountBeyondBound(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	configJSON := `{"schema_version":"v0alpha1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
+	configJSON := `{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -440,9 +445,16 @@ func quoted(value string) string {
 	return string(b)
 }
 
-func snapshot(t *testing.T, root string) map[string]int64 {
+type snapshotEntry struct {
+	Mode    os.FileMode
+	Size    int64
+	ModTime int64
+	Hash    string
+}
+
+func snapshot(t *testing.T, root string) map[string]snapshotEntry {
 	t.Helper()
-	result := map[string]int64{}
+	result := map[string]snapshotEntry{}
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -455,7 +467,16 @@ func snapshot(t *testing.T, root string) map[string]int64 {
 		if err != nil {
 			return err
 		}
-		result[rel] = info.Size()
+		observed := snapshotEntry{Mode: info.Mode(), Size: info.Size(), ModTime: info.ModTime().UnixNano()}
+		if info.Mode().IsRegular() {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			sum := sha256.Sum256(content)
+			observed.Hash = hex.EncodeToString(sum[:])
+		}
+		result[rel] = observed
 		return nil
 	})
 	if err != nil {

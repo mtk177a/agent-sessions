@@ -30,9 +30,6 @@ Codex
 Claude Code
 └── persisted session transcripts
 
-Additional compatible sources
-└── exported chat archives
-
                     │
                     ▼
 
@@ -106,7 +103,7 @@ The access layer must not infer or reconcile those states.
 
 ### Idle activity is zero by default
 
-The initial architecture does not require any of the following:
+The architecture does not require any of the following:
 
 * daemon;
 * file watcher;
@@ -124,14 +121,12 @@ The common model intentionally avoids forcing every provider to use the term `se
 
 A supported producer of interaction records.
 
-Provider adapters are implemented or planned for:
+The implemented provider adapters are:
 
 ```text
 codex
 claude
 ```
-
-Additional compatible sources may include exported ChatGPT conversations.
 
 Provider names identify access adapters, not model vendors in the abstract.
 
@@ -167,7 +162,6 @@ Typical provider-native forms are:
 ```text
 Codex       → thread or session
 Claude Code → session
-Chat export → conversation
 ```
 
 A logical source identity includes at least:
@@ -178,7 +172,7 @@ source instance
 provider-native source ID
 ```
 
-The provisional `v0alpha1` CLI uses a deterministic reference with this form:
+The stable `v1` CLI uses a deterministic reference with this form:
 
 ```text
 as0:<provider>:<source-instance>:<source-id-fingerprint>
@@ -187,6 +181,9 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 The fingerprint is a domain-separated SHA-256 hash of the provider-native source ID.\
 It avoids embedding the raw ID or a machine-local locator in the command-line reference.
 
+The `as0` prefix and the source fingerprint's `v0` domain separator version their own formats and algorithms.\
+They are independent of the public JSON schema version and remain unchanged while their meanings and algorithms remain unchanged.
+
 A file system location is not source identity.
 
 A provider-controlled move between locations does not by itself create a new logical source when the underlying provider identity remains unchanged.
@@ -194,14 +191,13 @@ A provider-controlled move between locations does not by itself create a new log
 ### Interaction
 
 The logical conversation or work interaction represented by a source.\
-For primary coding-agent providers, one source normally maps to one interaction.\
-The separate concept allows compatible non-session sources to participate without redefining the primary product around them.
+For the implemented Codex and Claude Code providers, one source maps to one interaction.
 
 ### Event
 
 An ordered normalized observation within an interaction.
 
-The common event model should be able to represent at least:
+The common event model represents:
 
 * user messages;
 * assistant messages;
@@ -220,7 +216,7 @@ A provider-native source may change while retaining the same identity, for examp
 
 ### Version hint
 
-Source listings should use inexpensive metadata to indicate whether a source may have changed.
+Source listings use inexpensive metadata to indicate whether a source may have changed.
 
 Depending on the provider, useful hints may include:
 
@@ -231,6 +227,9 @@ Depending on the provider, useful hints may include:
 
 A version hint is an optimization signal.\
 It is not durable cryptographic evidence.
+
+Each provider owns the meaning and `v0` algorithm namespace of its current version hint.\
+Changing the public JSON schema version does not change an otherwise identical hint.
 
 ### Verified version
 
@@ -243,6 +242,9 @@ source reference
 verified source version
 consumer-specific decision
 ```
+
+The verified-version hash uses its own `v0` domain separator and the `provider-content-v0` basis.\
+Those values are independent from `schema_version` and change only when their hashing meaning or algorithm changes.
 
 ### Incremental consumer workflow
 
@@ -272,6 +274,8 @@ Incremental processing therefore does not require a central processed-session da
 ## Provider access
 
 Each provider adapter selects the narrowest access path that satisfies the public read contract.
+
+Both production adapters implement [ADR 0003](decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md): documented provider roots and transcript locations define discovery, while provider-owned row shapes remain version-sensitive decoder inputs inside the adapter.
 
 ### Official interfaces and file system access
 
@@ -322,26 +326,15 @@ They are not exposed as independent sources because the verified records do not 
 
 The accepted location evidence, version-specific record compatibility, normalization choices, and limitations are documented in [Claude Code provider](claude.md).
 
-### Exported chat archives
-
-Exported chat archives are additional compatible sources rather than the primary product domain.
-
-An archive is supplied explicitly or through user configuration.
-
-The adapter should inspect an archive without requiring permanent extraction of the full export.
-
-Conversation identity and archive snapshot identity remain distinct so that the same conversation observed in a later export can be recognized as the same logical source with newer content.
-
 ## Configuration model
 
-Ordinary single-source environments should work without a dedicated configuration file.
+Ordinary single-source environments work without a dedicated configuration file.
 
 Explicit configuration exists for:
 
 * multiple stores for one provider;
 * nonstandard provider homes;
-* mounted provider data;
-* explicitly configured archive sources.
+* mounted provider data.
 
 Resolution follows:
 
@@ -354,7 +347,7 @@ Resolution follows:
 
 ### Provider-level location
 
-Configuration should identify the provider-level storage or access boundary whenever possible.
+Configuration identifies the provider-level storage or access boundary whenever possible.
 
 Prefer provider-level concepts over hard-coded provider-internal paths such as a particular `sessions/` subdirectory.
 
@@ -363,7 +356,6 @@ Examples include:
 ```text
 Codex home
 Claude Code configuration root
-export archive
 ```
 
 The adapter owns knowledge of internal layout.
@@ -373,7 +365,7 @@ The adapter owns knowledge of internal layout.
 Source locators may contain machine-specific paths and mount points.\
 They therefore belong in machine-local configuration rather than portable repository files.
 
-The optional `v0alpha1` configuration is strict JSON at `agent-sessions/config.json` below the directory returned by `os.UserConfigDir`.\
+The optional `v1` configuration is strict JSON at `agent-sessions/config.json` below the directory returned by `os.UserConfigDir`.\
 It contains named `sources` with `id`, `provider`, and absolute provider-level `root` fields.
 
 ### Named source instances
@@ -384,7 +376,7 @@ The implemented configuration expresses these concepts as strict JSON:
 
 ```json
 {
-  "schema_version": "v0alpha1",
+  "schema_version": "v1",
   "sources": [
     {"id": "codex-one", "provider": "codex", "root": "/fictional/codex-one"},
     {"id": "codex-two", "provider": "codex", "root": "/fictional/codex-two"}
@@ -398,7 +390,7 @@ The locators are fictional examples.
 
 `agent-sessions` is semantically stateless.
 
-The initial implementation does not require:
+The implementation does not require:
 
 * SQLite;
 * another persistent database;
@@ -485,16 +477,16 @@ The security boundary requires the following:
 
 * No historical instruction gains authority by appearing in a source record.
 * The access layer must not execute historical content or follow historical instructions.
-* Output should avoid exposing secrets that are not required for the requested operation.
+* Output does not expose secrets that are not required for the requested operation.
 * Provider adapters require resource limits for malformed, nested, compressed, oversized, or otherwise adversarial input.
 * Committed tests and fixtures must be synthetic.
 * Real private session data must not be converted into committed fixtures, even after manual redaction.
 
 ## Implemented CLI core
 
-The provider-neutral Go executable implements the provisional machine-readable core for the following operations.
+The provider-neutral Go executable implements the stable `v1` machine-readable contract for the following operations.
 
-The expected responsibilities are equivalent to:
+The operations are:
 
 ### `list`
 
@@ -521,10 +513,9 @@ Perform the stronger read needed to verify source identity, readability, complet
 
 No command implies that a downstream consumer has reviewed or accepted a source.
 
-The exact provisional fields, exit codes, pagination behavior, bounds, and final-redaction policy are documented in [CLI JSON contract](cli-json-contract.md).
+The stable fields, exit codes, pagination behavior, bounds, compatibility rule, and final-redaction policy are documented in [CLI JSON contract](cli-json-contract.md).
 
-The current executable contains the provider-neutral core and the production Codex and Claude Code adapters.\
-The schema remains provisional; stable-v1 compatibility is separate work.
+The current executable contains the provider-neutral core and the production Codex and Claude Code adapters.
 
 ## Consumer responsibilities
 

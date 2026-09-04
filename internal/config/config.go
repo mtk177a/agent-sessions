@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	SchemaVersion = "v0alpha1"
+	SchemaVersion = "v1"
 	MaxBytes      = 1 << 20
 	MaxDepth      = 64
 )

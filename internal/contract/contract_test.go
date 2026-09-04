@@ -185,6 +185,18 @@ func TestBoundsAndCompletenessInvariants(t *testing.T) {
 	}
 }
 
+func TestEnvelopeRejectsUnsupportedSchemaVersions(t *testing.T) {
+	for _, version := range []string{"v0alpha1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			envelope := NewEnvelope("list", "test", StatusComplete)
+			envelope.SchemaVersion = version
+			if err := envelope.Validate(); err == nil {
+				t.Fatalf("schema version %q was accepted", version)
+			}
+		})
+	}
+}
+
 func TestBoundsCoverEveryPublicFreeFormString(t *testing.T) {
 	oversized := strings.Repeat("x", MaxStringBytes+1)
 	ref := NewSourceRef("synthetic", "synthetic-default", oversized)

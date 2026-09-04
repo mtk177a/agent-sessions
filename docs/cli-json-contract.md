@@ -2,16 +2,16 @@
 
 ## Compatibility status
 
-The initial schema is `v0alpha1`.\
-It is intentionally provisional until production Codex and Claude Code adapters validate the common model.
+The public response schema is stable `v1`.\
+The same contract is implemented by the production Codex and Claude Code adapters.
 
 Every response includes:
 
 ```json
 {
-  "schema_version": "v0alpha1",
+  "schema_version": "v1",
   "cli_version": "dev",
-  "redaction_policy_version": "v0alpha1",
+  "redaction_policy_version": "v1",
   "operation": "list",
   "status": "complete",
   "data": {},
@@ -19,8 +19,32 @@ Every response includes:
 }
 ```
 
-`data`, `page`, and `error` are present only when applicable.\
 JSON is the only automation contract; human-readable output is not implemented.
+
+The envelope fields have these presence rules:
+
+| Field | Presence |
+| --- | --- |
+| `schema_version` | Required. Always `v1` for this contract. |
+| `cli_version` | Required. Identifies the executable build and may be `dev`. |
+| `redaction_policy_version` | Required. Always `v1` for the current policy. |
+| `operation` | Required. One of `list`, `show`, `events`, `verify`, or `cli` for command-level errors. |
+| `status` | Required. One of the four completeness states below. |
+| `data` | Required for `complete` and `partial` operation results; absent for `unsupported` and `error`. |
+| `page` | Required for successful or partial `list` and `events` results; absent otherwise. |
+| `omissions` | Required. It is an empty array for `complete` and `error`. |
+| `error` | Required only for `error`; absent for every other status. |
+
+### Compatibility rule
+
+A consumer must read and validate `schema_version` before interpreting `data` or any other version-dependent field.\
+A consumer that implements this contract accepts `v1` and rejects an unknown major version.
+
+Additive optional fields may be introduced within `v1`, and consumers must ignore unknown response fields after accepting the schema major.\
+Removing or changing a required field, changing an existing field's meaning, or incompatibly changing a status, event kind, exit code, logical identity rule, or other required semantic requires a new major schema version.
+
+`cli_version` reports the executable version and does not select the response schema.\
+The configuration schema is separately validated and currently accepts exactly `v1`.
 
 ## Operations
 
@@ -28,6 +52,9 @@ JSON is the only automation contract; human-readable output is not implemented.
 
 `list` returns `data.sources` and a `page` object.\
 Sources are sorted by logical source reference before offset pagination is applied.
+
+Each source requires `identity`, `kind`, `relationships`, and `metadata`.\
+`version_hint` and `identity.provider_native_source_id` are optional; all other identity fields are required.
 
 ### `show <source-ref>`
 
@@ -44,6 +71,9 @@ Event indexes are zero-based and preserve provider order.
 
 The verified version is SHA-256 over a domain separator followed by name-sorted evidence chunks.\
 Each chunk name and content is prefixed with its unsigned 64-bit big-endian byte length, and duplicate chunk names are rejected.
+
+`verified_version` requires `algorithm`, `basis`, and `value`.\
+The current values use `sha256`, `provider-content-v0`, and a `sha256:`-prefixed digest.
 
 ## Logical identity
 
@@ -67,9 +97,12 @@ The reference therefore remains deterministic without embedding the raw native I
 The raw provider-native ID is included in JSON only when final redaction can preserve it safely.\
 The fingerprint and source reference remain available when the raw value is omitted or redacted.
 
+The `as0` prefix and the source fingerprint's `v0` domain separator are versioned independently from `schema_version`.\
+They do not change merely because the public response schema has reached `v1`.
+
 ## Events
 
-Each event contains `index`, `kind`, typed event data, and bounded metadata.
+Each event requires `index`, `kind`, exactly one typed event payload, and bounded `metadata`.
 
 Supported kinds are:
 
@@ -82,6 +115,17 @@ A tool result must reference one earlier unique tool call, and at most one norma
 Provider adapters report duplicate, missing, or unmatched correlation as an omission instead of emitting an ambiguous event sequence.
 
 Raw commands and raw tool arguments are not part of the public event model.
+
+Normalized call IDs use an adapter-owned `v0` algorithm namespace independent from `schema_version`.\
+Provider correlation identifiers are not public call IDs.
+
+## Provider-specific information
+
+Provider-specific artifact layouts, row types, raw tool names, and correlation values remain inside the owning adapter.\
+Only bounded metadata that is safe to expose without inventing a provider-neutral meaning may appear in the common `metadata` arrays.
+
+An adapter reports a material value that cannot be represented faithfully as an omission.\
+It does not promote an unstable provider field into the stable schema or claim `complete` by guessing an equivalent common meaning.
 
 ## Completeness and omissions
 
@@ -101,6 +145,9 @@ If every observed adapter result is unsupported, the response is `unsupported`; 
 
 Pagination with `has_more: true` returns `partial`, an omission with code `pagination`, and a versioned `next_cursor`.\
 Cursor contents are opaque to consumers.
+
+The current cursor begins with `v0:`.\
+That cursor format version is independent from `schema_version`.
 
 ## Structured errors and exit codes
 
@@ -124,7 +171,7 @@ Configuration is strict JSON:
 
 ```json
 {
-  "schema_version": "v0alpha1",
+  "schema_version": "v1",
   "sources": [
     {"id": "example-default", "provider": "example", "root": "/fictional/root"}
   ]
@@ -175,7 +222,7 @@ Oversized structural identifiers fail closed with a structured resource error in
 All dynamic strings pass through final redaction immediately before JSON encoding.\
 This includes source metadata, version hints, messages, error events, omissions, structured errors, diagnostics, and build-version strings.
 
-The initial policy removes credential-like values, authorization values, absolute Unix and Windows paths, UNC paths, file URIs, raw hostnames, and command-shaped text.\
+The `v1` policy removes credential-like values, authorization values, absolute Unix and Windows paths, UNC paths, file URIs, raw hostnames, and command-shaped text.\
 Any material redaction adds an `output_redacted` omission and prevents a complete result.
 
 Provider roots, raw commands, and raw tool arguments are excluded before this final pass.\

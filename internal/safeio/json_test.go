@@ -34,6 +34,14 @@ func TestDecodeJSONFileRejectsMalformedOversizedAndDeepInput(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONRejectsDeepInput(t *testing.T) {
+	data := []byte(strings.Repeat(`{"x":`, 9) + `0` + strings.Repeat(`}`, 9))
+	var target map[string]any
+	if err := DecodeJSON(data, 8, &target); err == nil {
+		t.Fatal("deep JSON value was accepted")
+	}
+}
+
 func TestReadFileWithinRejectsTraversalAndSymlinkEscape(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

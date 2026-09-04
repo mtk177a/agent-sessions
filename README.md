@@ -31,10 +31,10 @@ The installation uses `GOBIN` when set and otherwise uses the Go toolchain's def
 The machine-readable interface consists of four operations:
 
 ```text
-agent-sessions list [--provider ID [--source-instance ID] [--root PATH]]
-agent-sessions show [--root PATH] <source-ref>
-agent-sessions events [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
-agent-sessions verify [--root PATH] <source-ref>
+agent-sessions list [--config PATH] [--provider ID [--source-instance ID] [--root PATH]] [--limit N] [--cursor TOKEN]
+agent-sessions show [--config PATH] [--root PATH] <source-ref>
+agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
+agent-sessions verify [--config PATH] [--root PATH] <source-ref>
 ```
 
 All operations emit one stable `v1` JSON object to standard output.\
@@ -268,7 +268,7 @@ These capabilities belong to downstream consumers or separate systems.
 ## Development validation
 
 ```sh
-test -z "$(gofmt -l cmd internal)"
+unformatted="$(gofmt -l cmd internal)" && test -z "$unformatted"
 go test ./...
 go test -race ./...
 go vet ./...
@@ -276,7 +276,7 @@ mkdir -p dist
 GOOS=linux GOARCH=amd64 go build -o dist/agent-sessions-linux-amd64 ./cmd/agent-sessions
 GOOS=darwin GOARCH=amd64 go build -o dist/agent-sessions-darwin-amd64 ./cmd/agent-sessions
 GOOS=windows GOARCH=amd64 go build -o dist/agent-sessions-windows-amd64.exe ./cmd/agent-sessions
-git diff --check
+git diff --check origin/main...HEAD
 ```
 
 ## License

@@ -13,7 +13,7 @@ import (
 const (
 	SchemaVersion = "v1"
 	MaxBytes      = 1 << 20
-	MaxDepth      = 64
+	MaxDepth      = contract.MaxJSONDepth
 )
 
 type Config struct {

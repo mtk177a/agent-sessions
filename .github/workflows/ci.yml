@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version: 1.27.x
@@ -25,6 +27,8 @@ jobs:
             printf '%s\n' "$unformatted"
             exit 1
           fi
+      - name: Check branch diff
+        run: git diff --check origin/main...HEAD
       - name: Run race-enabled tests
         run: go test -race ./...
       - name: Run static analysis

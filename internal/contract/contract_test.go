@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,27 @@ func TestVerifiedVersionIsDeterministicAcrossChunkOrder(t *testing.T) {
 	}
 	if _, err := VerifiedVersion(nil); err == nil {
 		t.Fatal("empty evidence was accepted")
+	}
+}
+
+func TestVerifiedVersionReaderMatchesChunkEncoding(t *testing.T) {
+	content := []byte("synthetic archive bytes")
+	want, err := VerifiedVersion([]EvidenceChunk{{Name: "archive/export.zip", Content: content}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := VerifiedVersionReader("archive/export.zip", uint64(len(content)), bytes.NewReader(content), uint64(len(content)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("streamed version = %#v, want %#v", got, want)
+	}
+	if !ValidVerifiedVersion(got) {
+		t.Fatalf("streamed version is invalid: %#v", got)
+	}
+	if _, err := VerifiedVersionReader("archive/export.zip", uint64(len(content)+1), bytes.NewReader(content), uint64(len(content)+1)); err == nil {
+		t.Fatal("short evidence stream was accepted")
 	}
 }
 

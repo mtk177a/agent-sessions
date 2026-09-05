@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"hash"
+	"io"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -14,6 +16,7 @@ import (
 const MaxEvidenceBytes = 64 << 20
 
 var evidenceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,254}$`)
+var verifiedValuePattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type EvidenceChunk struct {
 	Name    string
@@ -53,8 +56,50 @@ func VerifiedVersion(chunks []EvidenceChunk) (VerifiedVersionID, error) {
 	return VerifiedVersionID{Algorithm: "sha256", Basis: "provider-content-v0", Value: "sha256:" + hex.EncodeToString(h.Sum(nil))}, nil
 }
 
+// VerifiedVersionReader computes the v0 provider-content identifier without
+// retaining the evidence in memory. It encodes one named chunk exactly as
+// VerifiedVersion does.
+func VerifiedVersionReader(name string, size uint64, reader io.Reader, maxBytes uint64) (VerifiedVersionID, error) {
+	if !validEvidenceName(name) {
+		return VerifiedVersionID{}, errors.New("invalid evidence chunk name")
+	}
+	if size > maxBytes || size > math.MaxInt64 {
+		return VerifiedVersionID{}, errors.New("verified evidence exceeds size limit")
+	}
+	h := sha256.New()
+	_, _ = h.Write([]byte("agent-sessions:verified-version:v0\x00"))
+	writeUint64(h, uint64(len(name)))
+	_, _ = h.Write([]byte(name))
+	writeUint64(h, size)
+	written, err := io.CopyN(h, reader, int64(size))
+	if err != nil || uint64(written) != size {
+		return VerifiedVersionID{}, errors.New("verified evidence is shorter than declared")
+	}
+	return VerifiedVersionID{Algorithm: "sha256", Basis: "provider-content-v0", Value: "sha256:" + hex.EncodeToString(h.Sum(nil))}, nil
+}
+
+func ValidVerifiedVersion(version VerifiedVersionID) bool {
+	return version.Algorithm == "sha256" && version.Basis == "provider-content-v0" && verifiedValuePattern.MatchString(version.Value)
+}
+
+func validEvidenceName(name string) bool {
+	if !evidenceNamePattern.MatchString(name) {
+		return false
+	}
+	for _, segment := range strings.Split(name, "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 func writeLength(h hash.Hash, length int) {
+	writeUint64(h, uint64(length))
+}
+
+func writeUint64(h hash.Hash, length uint64) {
 	var encoded [8]byte
-	binary.BigEndian.PutUint64(encoded[:], uint64(length))
+	binary.BigEndian.PutUint64(encoded[:], length)
 	_, _ = h.Write(encoded[:])
 }

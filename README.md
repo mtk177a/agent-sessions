@@ -4,7 +4,7 @@
 
 It discovers provider-owned interaction records, exposes them through a normalized machine-readable interface, and leaves interpretation and durable processing state to downstream consumers.
 
-> Status: the provider-neutral CLI core and read-only Codex and Claude Code adapters implement the stable `v1` JSON contract.
+> Status: the provider-neutral CLI core and read-only Codex, Claude Code, and ChatGPT Data Export adapters implement the stable `v1` JSON contract.
 
 ## Build
 
@@ -40,8 +40,8 @@ agent-sessions verify [--config PATH] [--root PATH] <source-ref>
 All operations emit one stable `v1` JSON object to standard output.\
 Consumers must check `schema_version` before interpreting any other response field.
 
-The production registry contains the `codex` and `claude` provider adapters.\
-They discover provider-owned records directly without starting either provider application or writing persistent state.
+The production registry contains the `codex`, `claude`, and `chatgpt` provider adapters.\
+They discover provider-owned records directly without starting a provider application or writing persistent state.
 
 For `list`, `--source-instance` and `--root` are provider-scoped selectors and require `--provider`.
 When `list` uses provider environment or default roots, an absent implicit root contributes no sources and does not prevent results from other registered providers.\
@@ -51,12 +51,13 @@ See [CLI JSON contract](docs/cli-json-contract.md) for fields, pagination, bound
 
 ## Basic usage
 
-Discover sources from both installed providers, or select one provider explicitly:
+Discover sources from available implicit roots, or select one provider explicitly:
 
 ```sh
 agent-sessions list
 agent-sessions list --provider codex
 agent-sessions list --provider claude
+agent-sessions list --provider chatgpt --source-instance chatgpt-personal --root /fictional/chatgpt-export.zip
 ```
 
 Read the `identity.source_ref` value from a `list` response and pass it unchanged to the source operations:
@@ -129,6 +130,7 @@ Supported providers:
 
 - Codex: implemented for the compatibility boundary documented in [Codex provider](docs/codex.md)
 - Claude Code: implemented for the compatibility boundary documented in [Claude Code provider](docs/claude.md)
+- ChatGPT Data Export: implemented for explicitly named export ZIPs within the compatibility boundary documented in [ChatGPT Data Export provider](docs/chatgpt.md)
 
 ## Source model
 
@@ -161,6 +163,9 @@ See [Architecture](docs/architecture.md) for the detailed model.
 ## Configuration
 
 Common single-source environments work without `agent-sessions` configuration.
+
+ChatGPT Data Export is intentionally explicit-only because an export is a user-selected snapshot rather than a provider home.\
+Select it with both `--provider chatgpt --root PATH`, or configure a named `chatgpt` source instance whose `root` is the ZIP path.
 
 Explicit configuration is intended for cases such as:
 
@@ -260,6 +265,7 @@ These capabilities belong to downstream consumers or separate systems.
 - [Architecture](docs/architecture.md)
 - [Codex provider](docs/codex.md)
 - [Claude Code provider](docs/claude.md)
+- [ChatGPT Data Export provider](docs/chatgpt.md)
 - [ADR 0001: Use stateless, read-only source access](docs/decisions/0001-use-stateless-read-only-source-access.md)
 - [ADR 0002: Model provider sources as named instances](docs/decisions/0002-model-provider-sources-as-named-instances.md)
 - [ADR 0003: Separate provider discovery from version-sensitive decoding](docs/decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md)

@@ -131,6 +131,64 @@ func TestStructuredErrorsAndExitCodes(t *testing.T) {
 	}
 }
 
+func TestProviderArchiveErrorsRemainDistinct(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":`+quoted(root)+`}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{provider.ErrInvalidArchive, "invalid_archive"},
+		{provider.ErrInvalidJSON, "invalid_json"},
+		{provider.ErrDuplicateArchiveMember, "duplicate_archive_member"},
+		{provider.ErrUnsafeArchiveMember, "unsafe_archive_member"},
+		{provider.ErrResourceLimit, "provider_resource_limit"},
+		{provider.ErrSourceChanged, "source_changed"},
+	} {
+		adapter := newSyntheticAdapter()
+		runner := Runner{Version: "test", Registry: provider.NewRegistry(&errorAdapter{syntheticAdapter: adapter, err: tc.err})}
+		var output bytes.Buffer
+		if exit := runner.Run(context.Background(), []string{"list", "--config", configPath, "--provider", "synthetic"}, &output); exit != ExitFailure {
+			t.Fatalf("exit = %d, output=%s", exit, output.String())
+		}
+		var envelope contract.Envelope
+		if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Error == nil || envelope.Error.Code != tc.code {
+			t.Fatalf("error = %#v, want code %q", envelope.Error, tc.code)
+		}
+	}
+}
+
+func TestVerifyAcceptsPrecomputedProviderContentVersion(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":`+quoted(root)+`}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := newSyntheticAdapter()
+	version, err := contract.VerifiedVersion([]contract.EvidenceChunk{{Name: "archive/export.zip", Content: []byte("synthetic")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := Runner{Version: "test", Registry: provider.NewRegistry(&precomputedAdapter{syntheticAdapter: adapter, version: version})}
+	var output bytes.Buffer
+	if exit := runner.Run(context.Background(), []string{"verify", "--config", configPath, adapter.source.Identity.SourceRef}, &output); exit != ExitOK {
+		t.Fatalf("exit = %d, output=%s", exit, output.String())
+	}
+	var envelope contract.Envelope
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data == nil || envelope.Data.VerifiedVersion == nil || *envelope.Data.VerifiedVersion != version {
+		t.Fatalf("verified version = %#v", envelope.Data)
+	}
+}
+
 func TestUnsupportedAdapterResultForEveryOperation(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
@@ -325,6 +383,24 @@ func TestEventsRejectEventCountBeyondBound(t *testing.T) {
 type syntheticAdapter struct {
 	source contract.Source
 	events []contract.Event
+}
+
+type errorAdapter struct {
+	*syntheticAdapter
+	err error
+}
+
+func (a *errorAdapter) List(context.Context, config.Source) provider.SourceResult {
+	return provider.SourceResult{Err: a.err}
+}
+
+type precomputedAdapter struct {
+	*syntheticAdapter
+	version contract.VerifiedVersionID
+}
+
+func (a *precomputedAdapter) Evidence(context.Context, config.Source, string) provider.EvidenceResult {
+	return provider.EvidenceResult{Status: contract.StatusComplete, VerifiedVersion: &a.version}
 }
 
 type unsupportedAdapter struct {

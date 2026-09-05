@@ -130,6 +130,16 @@ func TestResolveAllSkipsOnlyMissingImplicitRoots(t *testing.T) {
 	}
 }
 
+func TestResolveAllSkipsProviderWithoutImplicitRoot(t *testing.T) {
+	got, err := ResolveAll("explicit-only", "", "", Config{}, fakeDefaults{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("provider without an implicit root resolved to %#v", got)
+	}
+}
+
 type fakeDefaults struct {
 	environment string
 	fallback    string

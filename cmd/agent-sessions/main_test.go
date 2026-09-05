@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -101,6 +102,70 @@ func TestProductionRegistrySupportsBothProvidersEndToEnd(t *testing.T) {
 	}
 }
 
+func TestProductionRegistrySupportsChatGPTDataExport(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
+	exportPath := filepath.Join(root, "chatgpt-export.zip")
+	writeChatGPTExport(t, exportPath)
+	configPath := filepath.Join(root, "config.json")
+	configured := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, exportPath)
+	if err := os.WriteFile(configPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := newRunner()
+	listed := runProductionCLI(t, runner, "list", "--config", configPath)
+	if listed.Data == nil || listed.Data.Sources == nil || len(*listed.Data.Sources) != 1 {
+		t.Fatalf("list data = %#v", listed.Data)
+	}
+	source := (*listed.Data.Sources)[0]
+	if source.Identity.Provider != "chatgpt" || source.Identity.SourceInstance != "chatgpt-one" || source.VersionHint == nil || source.VersionHint.Kind != "snapshot_hash" {
+		t.Fatalf("source = %#v", source)
+	}
+	shown := runProductionCLI(t, runner, "show", "--config", configPath, source.Identity.SourceRef)
+	if shown.Data == nil || shown.Data.Source == nil || shown.Data.Source.Identity != source.Identity {
+		t.Fatalf("show data = %#v", shown.Data)
+	}
+	events := runProductionCLI(t, runner, "events", "--config", configPath, source.Identity.SourceRef)
+	if events.Data == nil || events.Data.Events == nil || len(*events.Data.Events) != 2 {
+		t.Fatalf("events data = %#v", events.Data)
+	}
+	verified := runProductionCLI(t, runner, "verify", "--config", configPath, source.Identity.SourceRef)
+	if verified.Data == nil || verified.Data.VerifiedVersion == nil || verified.Data.VerifiedVersion.Basis != "provider-content-v0" || verified.Data.VerifiedVersion.Value == source.VersionHint.Value {
+		t.Fatalf("verify data = %#v", verified.Data)
+	}
+}
+
+func TestChatGPTEventsApplyFinalRedactionAndRetainPolicyVersion(t *testing.T) {
+	root := t.TempDir()
+	exportPath := filepath.Join(root, "chatgpt-export.zip")
+	content := `[{"id":"fictional-conversation","conversation_id":"fictional-conversation","current_node":"user","mapping":{"user":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["token=sk-fictional-secret"]}}}}}]`
+	writeChatGPTExportContent(t, exportPath, content)
+	configPath := filepath.Join(root, "config.json")
+	configured := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, exportPath)
+	if err := os.WriteFile(configPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref := contract.NewSourceRef("chatgpt", "chatgpt-one", "fictional-conversation")
+	var output bytes.Buffer
+	if exit := newRunner().Run(context.Background(), []string{"events", "--config", configPath, ref}, &output); exit != cli.ExitOK {
+		t.Fatalf("exit = %d, output = %s", exit, output.String())
+	}
+	if bytes.Contains(output.Bytes(), []byte("sk-fictional-secret")) {
+		t.Fatalf("redaction leaked source content: %s", output.String())
+	}
+	var envelope contract.Envelope
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Status != contract.StatusPartial || envelope.RedactionPolicyVersion != "v1" || !hasOmissionCode(envelope.Omissions, "output_redacted") {
+		t.Fatalf("redaction contract = %#v", envelope)
+	}
+}
+
 func TestProductionRegistryDoesNotSkipExplicitOrConfiguredRoots(t *testing.T) {
 	home := t.TempDir()
 	missing := filepath.Join(home, "missing")
@@ -150,6 +215,43 @@ func writeCodexTranscript(t *testing.T, root string) {
 		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"must not escape"}}}` + "\n" +
 		`{"type":"event_msg","payload":{"type":"error","message":"fictional provider failure"}}` + "\n"
 	writeFixture(t, path, content)
+}
+
+func writeChatGPTExport(t *testing.T, filename string) {
+	t.Helper()
+	content := `[{"id":"fictional-conversation","conversation_id":"fictional-conversation","current_node":"assistant","mapping":{"root":{"parent":null,"message":null},"user":{"parent":"root","message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["hello"]}}},"assistant":{"parent":"user","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["hi"]}}}}}]`
+	writeChatGPTExportContent(t, filename, content)
+}
+
+func writeChatGPTExportContent(t *testing.T, filename, content string) {
+	t.Helper()
+	file, err := os.Create(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	member, err := writer.Create("conversations.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := member.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func hasOmissionCode(omissions []contract.Omission, code string) bool {
+	for _, omission := range omissions {
+		if omission.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func runProductionCLI(t *testing.T, runner cli.Runner, args ...string) contract.Envelope {

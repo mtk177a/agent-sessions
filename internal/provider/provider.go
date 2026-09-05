@@ -9,7 +9,15 @@ import (
 	"github.com/mtk177a/agent-sessions/internal/contract"
 )
 
-var ErrNotFound = errors.New("source not found")
+var (
+	ErrNotFound               = errors.New("source not found")
+	ErrInvalidArchive         = errors.New("invalid archive")
+	ErrInvalidJSON            = errors.New("invalid JSON")
+	ErrDuplicateArchiveMember = errors.New("duplicate archive member")
+	ErrUnsafeArchiveMember    = errors.New("unsafe archive member")
+	ErrResourceLimit          = errors.New("provider resource limit exceeded")
+	ErrSourceChanged          = errors.New("source changed while reading")
+)
 
 type SourceResult struct {
 	Status    contract.Status
@@ -26,10 +34,11 @@ type EventResult struct {
 }
 
 type EvidenceResult struct {
-	Status    contract.Status
-	Chunks    []contract.EvidenceChunk
-	Omissions []contract.Omission
-	Err       error
+	Status          contract.Status
+	Chunks          []contract.EvidenceChunk
+	VerifiedVersion *contract.VerifiedVersionID
+	Omissions       []contract.Omission
+	Err             error
 }
 
 type Adapter interface {

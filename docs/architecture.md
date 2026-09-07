@@ -30,6 +30,9 @@ Codex
 Claude Code
 └── persisted session transcripts
 
+ChatGPT
+└── user-requested Data Export ZIP
+
                     │
                     ▼
 
@@ -126,6 +129,7 @@ The implemented provider adapters are:
 ```text
 codex
 claude
+chatgpt
 ```
 
 Provider names identify access adapters, not model vendors in the abstract.
@@ -162,6 +166,7 @@ Typical provider-native forms are:
 ```text
 Codex       → thread or session
 Claude Code → session
+ChatGPT    → conversation within an export snapshot
 ```
 
 A logical source identity includes at least:
@@ -275,7 +280,7 @@ Incremental processing therefore does not require a central processed-session da
 
 Each provider adapter selects the narrowest access path that satisfies the public read contract.
 
-Both production adapters implement [ADR 0003](decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md): documented provider roots and transcript locations define discovery, while provider-owned row shapes remain version-sensitive decoder inputs inside the adapter.
+All production adapters implement [ADR 0003](decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md): documented provider roots, transcript locations, or export acquisition paths define discovery, while provider-owned JSON shapes remain version-sensitive decoder inputs inside the adapter.
 
 ### Official interfaces and file system access
 
@@ -293,7 +298,8 @@ If an official operation performs metadata repair, migration, synchronization, o
 File system parsing is an acceptable fallback when needed to preserve the stronger read-only contract.
 
 File-backed adapters open only bounded regular files.\
-The core rejects special files without blocking and rechecks the opened file identity, resolved path containment, and provider-root identity before reading so a path replacement cannot escape the configured source boundary.
+Directory-backed adapters recheck the opened file identity, resolved path containment, and provider-root identity; exact-file adapters recheck the selected file identity and content snapshot.\
+Special files and path replacement outside the configured source boundary are rejected.
 
 Provider-internal formats are version-sensitive inputs and are not automatically promoted to public `agent-sessions` contracts.
 
@@ -326,6 +332,21 @@ They are not exposed as independent sources because the verified records do not 
 
 The accepted location evidence, version-specific record compatibility, normalization choices, and limitations are documented in [Claude Code provider](claude.md).
 
+### ChatGPT Data Export
+
+The ChatGPT adapter accepts only an explicitly selected Data Export ZIP.\
+It does not discover archives, request an export, download one, or use a private ChatGPT API.
+
+The named source instance identifies the selected archive boundary, while each conversation in the archive is an independently addressable logical source.\
+Conversation identity comes from the provider-native conversation identity; the archive SHA-256 is a separate snapshot version hint shared by conversations found in the same ZIP.
+
+The adapter reads matching conversation JSON members in memory within explicit archive, member, compression-ratio, nesting, conversation, and event bounds.\
+It never extracts archive members to disk.\
+The active conversation branch is traversed from the current node through parent links, then normalized in chronological order.
+
+OpenAI documents how a user obtains a Data Export and that the archive contains chat history, but it does not publish the internal conversation JSON graph as a stable API.\
+That graph remains an adapter-scoped compatibility boundary documented in [ChatGPT Data Export provider](chatgpt.md).
+
 ## Configuration model
 
 Ordinary single-source environments work without a dedicated configuration file.
@@ -356,6 +377,7 @@ Examples include:
 ```text
 Codex home
 Claude Code configuration root
+ChatGPT Data Export ZIP
 ```
 
 The adapter owns knowledge of internal layout.

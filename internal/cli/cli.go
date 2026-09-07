@@ -239,15 +239,28 @@ func (r Runner) runVerify(ctx context.Context, args []string, output io.Writer) 
 	if result.Err != nil {
 		return r.writeProviderError(output, "verify", result.Err)
 	}
-	if err := validateProviderResultStatus(result.Status, result.Omissions, len(result.Chunks)); err != nil {
+	evidenceCount := len(result.Chunks)
+	if result.VerifiedVersion != nil {
+		evidenceCount++
+	}
+	if err := validateProviderResultStatus(result.Status, result.Omissions, evidenceCount); err != nil || result.VerifiedVersion != nil && len(result.Chunks) != 0 {
 		return r.writeError(output, "verify", ExitFailure, "invalid_provider_result", "provider", "The provider returned invalid verification evidence.")
 	}
 	if result.Status == contract.StatusUnsupported {
 		return r.writeUnsupportedResult(output, "verify", result.Omissions)
 	}
-	verified, err := contract.VerifiedVersion(result.Chunks)
-	if err != nil {
-		return r.writeError(output, "verify", ExitFailure, "verification_failed", "resource", "The source evidence could not be verified.")
+	var verified contract.VerifiedVersionID
+	if result.VerifiedVersion != nil {
+		verified = *result.VerifiedVersion
+		if !contract.ValidVerifiedVersion(verified) {
+			return r.writeError(output, "verify", ExitFailure, "invalid_provider_result", "provider", "The provider returned invalid verification evidence.")
+		}
+	} else {
+		var err error
+		verified, err = contract.VerifiedVersion(result.Chunks)
+		if err != nil {
+			return r.writeError(output, "verify", ExitFailure, "verification_failed", "resource", "The source evidence could not be verified.")
+		}
 	}
 	envelope := contract.NewEnvelope("verify", r.Version, result.Status)
 	envelope.Data = &contract.Data{SourceRef: "as0:" + parsed.Provider + ":" + parsed.SourceInstance + ":" + parsed.Fingerprint, VerifiedVersion: &verified}
@@ -299,8 +312,23 @@ func (r Runner) loadConfig(path string, output io.Writer, operation string) (con
 }
 
 func (r Runner) writeProviderError(output io.Writer, operation string, err error) int {
-	if errors.Is(err, provider.ErrNotFound) {
-		return r.writeError(output, operation, ExitFailure, "source_not_found", "provider", "The requested source was not found.")
+	for _, mapping := range []struct {
+		target   error
+		code     string
+		category string
+		message  string
+	}{
+		{provider.ErrNotFound, "source_not_found", "provider", "The requested source was not found."},
+		{provider.ErrInvalidArchive, "invalid_archive", "provider", "The source archive is malformed or unreadable."},
+		{provider.ErrInvalidJSON, "invalid_json", "provider", "A source JSON member is malformed."},
+		{provider.ErrDuplicateArchiveMember, "duplicate_archive_member", "provider", "The source archive contains a duplicate member."},
+		{provider.ErrUnsafeArchiveMember, "unsafe_archive_member", "provider", "The source archive contains an unsafe member path or type."},
+		{provider.ErrResourceLimit, "provider_resource_limit", "resource", "The source exceeds a provider processing limit."},
+		{provider.ErrSourceChanged, "source_changed", "provider", "The source changed while it was being read."},
+	} {
+		if errors.Is(err, mapping.target) {
+			return r.writeError(output, operation, ExitFailure, mapping.code, mapping.category, mapping.message)
+		}
 	}
 	return r.writeError(output, operation, ExitFailure, "provider_failure", "provider", "The provider operation failed.")
 }

@@ -8,6 +8,11 @@ import (
 
 type fileOpener func(string) (*os.File, error)
 
+// OpenRegular opens an exact regular-file path without following a final symlink.
+func OpenRegular(path string) (*os.File, string, error) {
+	return openVerifiedRegular(path, openRegularNoFollow)
+}
+
 func openVerifiedRegular(path string, opener fileOpener) (*os.File, string, error) {
 	preInfo, err := os.Lstat(path)
 	if err != nil {

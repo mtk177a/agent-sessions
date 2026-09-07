@@ -16,6 +16,8 @@ const (
 	MaxDepth      = contract.MaxJSONDepth
 )
 
+var ErrSourceUnresolved = errors.New("source instance cannot be resolved")
+
 type Config struct {
 	SchemaVersion string   `json:"schema_version"`
 	Sources       []Source `json:"sources"`
@@ -94,7 +96,7 @@ func ResolveOne(provider, instance, override string, configured Config, defaults
 	if root, ok := defaults.DefaultRoot(); ok {
 		return Source{ID: instance, Provider: provider, Root: root}, nil
 	}
-	return Source{}, errors.New("source instance cannot be resolved")
+	return Source{}, ErrSourceUnresolved
 }
 
 func ResolveAll(provider, override, overrideInstance string, configured Config, defaults Defaults) ([]Source, error) {
@@ -130,6 +132,9 @@ func ResolveAll(provider, override, overrideInstance string, configured Config, 
 	}
 	one, err := ResolveOne(provider, instance, "", Config{}, defaults)
 	if err != nil {
+		if errors.Is(err, ErrSourceUnresolved) {
+			return []Source{}, nil
+		}
 		return nil, err
 	}
 	if _, err := os.Stat(one.Root); errors.Is(err, os.ErrNotExist) {

@@ -105,8 +105,12 @@ Each relationship requires `kind` and `source_ref`.\
 The currently emitted relationship kinds are `parent` and `forked_from`, both based only on explicit provider-owned identity fields.\
 An adapter omits a relationship it cannot identify safely rather than deriving one from paths or event order.
 
-A source has `kind: "session"`.\
-When present, `version_hint` requires `kind` and `value`; the current adapters emit a `stat_hash` hint for inexpensive change detection.
+Source `kind` is an extensible token; the currently emitted values are `session` for Codex and Claude Code records and `conversation` for ChatGPT Data Export conversations.\
+Consumers must not reject an otherwise valid `v1` response solely because a source uses an unrecognized `kind` token.
+
+When present, `version_hint` requires `kind` and `value`, and its `kind` is also extensible.\
+Codex and Claude Code emit `stat_hash` for inexpensive change detection, while ChatGPT Data Export emits `snapshot_hash` for the SHA-256 identity of the complete export ZIP.\
+Consumers may use a recognized hint for change detection and must ignore an unrecognized hint kind.
 
 ## Logical identity
 
@@ -194,7 +198,8 @@ The current error codes are:
 
 - `missing_command`, `unknown_command`, `invalid_arguments`, `invalid_pagination`, `invalid_cursor`, and `invalid_source_ref`;
 - `source_resolution_failed`, `config_path_unavailable`, and `invalid_configuration`;
-- `source_not_found`, `provider_failure`, and `invalid_provider_result`;
+- `source_not_found`, `provider_failure`, `invalid_provider_result`, `invalid_archive`, `invalid_json`, `duplicate_archive_member`, `unsafe_archive_member`, and `source_changed`;
+- `provider_resource_limit`;
 - `event_limit_exceeded`, `verification_failed`, `output_bound_exceeded`, and `response_limit_exceeded`;
 - `invalid_result`.
 
@@ -242,6 +247,9 @@ For `list`, an absent root selected only through provider environment or provide
 This allows provider-neutral discovery to return available providers without requiring every registered provider to be installed.\
 An explicit `--root` or configured root is authoritative, so an access failure for either remains an operation error.
 
+Providers without an environment or default root contribute no implicit source instance.\
+The `chatgpt` provider is explicit-only: its root is the exact Data Export ZIP selected by the user, not a directory to search.
+
 `--config` selects an explicit configuration file.\
 It does not create or update that file.
 
@@ -250,7 +258,7 @@ It does not create or update that file.
 | Resource | Bound |
 | --- | ---: |
 | Configuration file | 1 MiB |
-| Provider or verification evidence | 64 MiB |
+| Buffered provider or verification evidence | 64 MiB |
 | JSON nesting | 64 levels |
 | Events per source observation | 100,000 |
 | Dynamic output string | 64 KiB |
@@ -258,6 +266,10 @@ It does not create or update that file.
 | Relationships per source | 64 |
 | Page size | default 50, maximum 100 |
 | Encoded response | 8 MiB |
+
+The common 64 MiB evidence bound applies to adapters that return evidence chunks to the CLI.\
+An archive adapter may stream a larger, provider-bounded source into the same `provider-content-v0` verified-version algorithm without materializing it as an evidence chunk.\
+Provider-specific input bounds are documented with each adapter and do not increase the 8 MiB response bound.
 
 Truncated dynamic output adds a `resource_truncation` omission and cannot remain complete.
 

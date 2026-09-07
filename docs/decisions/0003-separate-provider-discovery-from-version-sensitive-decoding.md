@@ -7,7 +7,7 @@
 
 The initial provider-neutral CLI needs stable discovery boundaries without promoting provider-owned transcript formats into the public contract.
 
-Provider documentation identifies storage roots and transcript locations, but the JSONL rows inside those locations are version-sensitive implementation details.\
+Provider documentation identifies storage roots, transcript locations, or export acquisition, but the JSONL rows and archive JSON graphs are version-sensitive implementation details.\
 Starting a provider service or depending on a lifecycle hook would also add behavior that is unnecessary for read-only discovery.
 
 ## Decision
@@ -27,7 +27,14 @@ For Claude Code:
 - the documented project transcript location under that root is the transcript discovery boundary;
 - transcript JSONL shapes remain an adapter-scoped compatibility boundary.
 
-For both providers:
+For ChatGPT Data Export:
+
+- the user-requested export ZIP is an explicit named source instance and is never auto-discovered or downloaded;
+- the publicly documented export acquisition path establishes compatibility with the source type;
+- conversation JSON graph shapes within the ZIP remain an adapter-scoped compatibility boundary rather than a stable OpenAI API;
+- the archive snapshot identity remains distinct from each provider-native conversation identity.
+
+For all providers:
 
 - unknown artifact shapes fail closed as `partial`, `unsupported`, or `error` rather than being silently accepted as complete;
 - provider-specific rows are normalized only inside the owning adapter;
@@ -47,3 +54,4 @@ An unknown shape may reduce completeness even when some safe information can sti
 - Codex hooks documentation: <https://learn.chatgpt.com/ja-JP/docs/hooks>
 - Claude Code session documentation: <https://code.claude.com/docs/en/sessions>
 - Claude Code hooks documentation: <https://code.claude.com/docs/en/hooks>
+- OpenAI Data Export documentation: <https://help.openai.com/en/articles/7260999-how-do-i-export-my-data>

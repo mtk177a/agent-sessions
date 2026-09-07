@@ -207,6 +207,80 @@ func TestUnknownActiveNodeIsIncomplete(t *testing.T) {
 	}
 }
 
+func TestMissingActiveNodeMessageIsIncomplete(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus contract.Status
+		wantEvents int
+	}{
+		{
+			name:       "after supported message",
+			body:       `[{"id":"c","conversation_id":"c","current_node":"missing-message","mapping":{"user":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["hello"]}}},"missing-message":{"parent":"user"}}}]`,
+			wantStatus: contract.StatusPartial,
+			wantEvents: 1,
+		},
+		{
+			name:       "only active node",
+			body:       `[{"id":"c","conversation_id":"c","current_node":"missing-message","mapping":{"missing-message":{"parent":null}}}]`,
+			wantStatus: contract.StatusUnsupported,
+			wantEvents: 0,
+		},
+		{
+			name:       "explicit null message",
+			body:       `[{"id":"c","conversation_id":"c","current_node":"root","mapping":{"root":{"parent":null,"message":null}}}]`,
+			wantStatus: contract.StatusComplete,
+			wantEvents: 0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeZIP(t, []zipMember{{"conversations.json", tc.body}})
+			result := New().Events(t.Context(), config.Source{ID: "export", Provider: providerName, Root: path}, contract.SourceFingerprint("c"))
+			wantOmission := tc.name != "explicit null message"
+			if result.Err != nil || result.Status != tc.wantStatus || len(result.Events) != tc.wantEvents || hasOmission(result.Omissions, "unknown_node") != wantOmission {
+				t.Fatalf("missing message result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestInvalidJSONStringsAreRejectedWithoutReplacement(t *testing.T) {
+	validPrefix := `[{"id":"c","conversation_id":"c","current_node":"m","mapping":{"m":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["`
+	validSuffix := `"]}}}}}]`
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "invalid UTF-8", body: validPrefix + string([]byte{0xff}) + validSuffix},
+		{name: "lone high UTF-16 surrogate", body: validPrefix + `\ud800` + validSuffix},
+		{name: "lone low UTF-16 surrogate", body: validPrefix + `\udc00` + validSuffix},
+		{name: "mismatched UTF-16 surrogate pair", body: validPrefix + `\ud800\u0061` + validSuffix},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeZIP(t, []zipMember{{"conversations.json", tc.body}})
+			result := New().List(t.Context(), config.Source{ID: "export", Provider: providerName, Root: path})
+			if !errors.Is(result.Err, provider.ErrInvalidJSON) {
+				t.Fatalf("error = %v, want %v", result.Err, provider.ErrInvalidJSON)
+			}
+		})
+	}
+}
+
+func TestValidJSONStringEncodingAcceptsLosslessStrings(t *testing.T) {
+	for _, value := range [][]byte{
+		[]byte(`{"text":"plain text"}`),
+		[]byte(`{"text":"\ud83d\ude00"}`),
+		[]byte(`{"text":"\\ud800 is literal text"}`),
+		[]byte(`{"text":"synthetic café"}`),
+	} {
+		if !validJSONStringEncoding(value) {
+			t.Fatalf("valid JSON string encoding was rejected: %q", value)
+		}
+	}
+}
+
 func TestAdapterDoesNotWriteOutsideArchive(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "export.zip")

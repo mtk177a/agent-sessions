@@ -13,6 +13,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mtk177a/agent-sessions/internal/config"
 	"github.com/mtk177a/agent-sessions/internal/contract"
@@ -223,7 +224,7 @@ func (a *Adapter) scan(ctx context.Context, source config.Source) (scannedArchiv
 			return scannedArchive{}, fmt.Errorf("%w: actual conversation bytes", provider.ErrResourceLimit)
 		}
 		var conversations []json.RawMessage
-		if !json.Valid(data) {
+		if !validJSONStringEncoding(data) || !json.Valid(data) {
 			return scannedArchive{}, fmt.Errorf("%w: conversation member", provider.ErrInvalidJSON)
 		}
 		if err := safeio.DecodeJSON(data, contract.MaxJSONDepth, &conversations); err != nil {
@@ -368,7 +369,11 @@ func (a *Adapter) normalize(conversation rawConversation) ([]contract.Event, []c
 	}
 	events := make([]contract.Event, 0, len(reversed))
 	for _, node := range reversed {
-		if len(node.Message) == 0 || string(node.Message) == "null" {
+		if len(node.Message) == 0 {
+			omissions = append(omissions, omission("unknown_node", "event", "An active-branch node without a message field was omitted."))
+			continue
+		}
+		if string(node.Message) == "null" {
 			continue
 		}
 		var message rawMessage
@@ -569,6 +574,67 @@ func slicesReverse[T any](values []T) {
 	for left, right := 0, len(values)-1; left < right; left, right = left+1, right-1 {
 		values[left], values[right] = values[right], values[left]
 	}
+}
+
+func validJSONStringEncoding(data []byte) bool {
+	if !utf8.Valid(data) {
+		return false
+	}
+	inString := false
+	for i := 0; i < len(data); i++ {
+		switch data[i] {
+		case '"':
+			inString = !inString
+		case '\\':
+			if !inString || i+1 >= len(data) {
+				continue
+			}
+			i++
+			if data[i] != 'u' {
+				continue
+			}
+			value, ok := jsonHexQuad(data, i+1)
+			if !ok {
+				return false
+			}
+			i += 4
+			switch {
+			case value >= 0xd800 && value <= 0xdbff:
+				if i+6 >= len(data) || data[i+1] != '\\' || data[i+2] != 'u' {
+					return false
+				}
+				low, ok := jsonHexQuad(data, i+3)
+				if !ok || low < 0xdc00 || low > 0xdfff {
+					return false
+				}
+				i += 6
+			case value >= 0xdc00 && value <= 0xdfff:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func jsonHexQuad(data []byte, start int) (uint16, bool) {
+	if start < 0 || start+4 > len(data) {
+		return 0, false
+	}
+	var value uint16
+	for _, char := range data[start : start+4] {
+		value <<= 4
+		switch {
+		case char >= '0' && char <= '9':
+			value += uint16(char - '0')
+		case char >= 'a' && char <= 'f':
+			value += uint16(char-'a') + 10
+		case char >= 'A' && char <= 'F':
+			value += uint16(char-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return value, true
 }
 
 func statusFor(omissions []contract.Omission) contract.Status {

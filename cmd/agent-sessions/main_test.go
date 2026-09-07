@@ -122,7 +122,7 @@ func TestProductionRegistrySupportsChatGPTDataExport(t *testing.T) {
 		t.Fatalf("list data = %#v", listed.Data)
 	}
 	source := (*listed.Data.Sources)[0]
-	if source.Identity.Provider != "chatgpt" || source.Identity.SourceInstance != "chatgpt-one" || source.VersionHint == nil || source.VersionHint.Kind != "snapshot_hash" {
+	if source.Identity.Provider != "chatgpt" || source.Identity.SourceInstance != "chatgpt-one" || source.Kind != "conversation" || source.VersionHint == nil || source.VersionHint.Kind != "snapshot_hash" {
 		t.Fatalf("source = %#v", source)
 	}
 	shown := runProductionCLI(t, runner, "show", "--config", configPath, source.Identity.SourceRef)

@@ -105,8 +105,12 @@ Each relationship requires `kind` and `source_ref`.\
 The currently emitted relationship kinds are `parent` and `forked_from`, both based only on explicit provider-owned identity fields.\
 An adapter omits a relationship it cannot identify safely rather than deriving one from paths or event order.
 
-A source has `kind: "session"`.\
-When present, `version_hint` requires `kind` and `value`; the current adapters emit a `stat_hash` hint for inexpensive change detection.
+Source `kind` is an extensible token; the currently emitted values are `session` for Codex and Claude Code records and `conversation` for ChatGPT Data Export conversations.\
+Consumers must not reject an otherwise valid `v1` response solely because a source uses an unrecognized `kind` token.
+
+When present, `version_hint` requires `kind` and `value`, and its `kind` is also extensible.\
+Codex and Claude Code emit `stat_hash` for inexpensive change detection, while ChatGPT Data Export emits `snapshot_hash` for the SHA-256 identity of the complete export ZIP.\
+Consumers may use a recognized hint for change detection and must ignore an unrecognized hint kind.
 
 ## Logical identity
 

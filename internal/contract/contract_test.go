@@ -301,8 +301,8 @@ func fullyPopulatedEnvelope() Envelope {
 	exitCode := 0
 	events := []Event{
 		{Index: 0, Kind: EventMessage, Message: &MessageEvent{Role: "user", Text: "message"}, Metadata: []Metadata{{Name: "note", Value: "value"}}},
-		{Index: 1, Kind: EventToolCall, ToolCall: &ToolCallEvent{CallID: "call-1", Category: "filesystem"}, Metadata: []Metadata{}},
-		{Index: 2, Kind: EventToolResult, ToolResult: &ToolResultEvent{CallID: "call-1", Success: true, ExitCode: &exitCode}, Metadata: []Metadata{}},
+		{Index: 1, Kind: EventToolCall, ToolCall: &ToolCallEvent{CallID: "call-1", Category: "filesystem", Action: "read", EvidenceState: EvidenceAvailable}, Metadata: []Metadata{}},
+		{Index: 2, Kind: EventToolResult, ToolResult: &ToolResultEvent{CallID: "call-1", Success: true, ExitCode: &exitCode, EvidenceState: EvidenceAbsent}, Metadata: []Metadata{}},
 		{Index: 3, Kind: EventError, Error: &ErrorEvent{Category: "provider", Message: "error"}, Metadata: []Metadata{}},
 	}
 	envelope := NewEnvelope("events", "test", StatusError)

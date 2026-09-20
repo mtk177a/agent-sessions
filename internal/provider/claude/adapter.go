@@ -88,6 +88,7 @@ type contentBlock struct {
 	Name       string          `json:"name"`
 	ToolUseID  string          `json:"tool_use_id"`
 	IsErrorRaw json.RawMessage `json:"is_error"`
+	Content    json.RawMessage `json:"content"`
 }
 
 func New() *Adapter { return &Adapter{maxFiles: maxDiscoveredFiles} }
@@ -591,7 +592,19 @@ func normalizeUserPayload(payload messagePayload, sessionID string, events *[]co
 				continue
 			}
 			results[block.ToolUseID] = struct{}{}
-			appendEvent(contract.Event{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: callID, Success: success}, Metadata: []contract.Metadata{}})
+			body, present, omitted, unsupported := claudeToolBody(block.Content)
+			excerpt, state, redacted, truncated := contract.SafeToolExcerpt(body, present)
+			if omitted && state == contract.EvidenceAbsent {
+				state = contract.EvidenceUnavailable
+			}
+			if unsupported && state != contract.EvidenceAvailable {
+				state = contract.EvidenceUnsupported
+			} else if unsupported {
+				redacted = true
+			}
+			outcome := contract.ToolResultEvent{CallID: callID, Success: success, Excerpt: excerpt, EvidenceState: state, Redacted: redacted || omitted, Truncated: truncated}
+			appendEvent(contract.Event{Kind: contract.EventToolResult, ToolResult: &outcome, Metadata: []contract.Metadata{}})
+			*omissions = append(*omissions, contract.ToolResultOmissions(outcome)...)
 		case "image", "document", "tool_reference":
 			flushText()
 			*omissions = append(*omissions, omission("unsupported_content", "events", "A Claude user message contained content that is not represented by the public text model."))
@@ -659,7 +672,7 @@ func normalizeAssistantPayload(payload messagePayload, apiError bool, sessionID 
 			}
 			callID := normalizedCallID(sessionID, block.ID)
 			calls[block.ID] = callID
-			appendEvent(contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: toolCategory(block.Name)}, Metadata: []contract.Metadata{}})
+			appendEvent(contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: toolCategory(block.Name), Action: toolAction(block.Name), EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}})
 			emittedTool = true
 		case "thinking", "redacted_thinking":
 			flushText()
@@ -726,6 +739,55 @@ func toolCategory(name string) string {
 		return "mcp"
 	}
 	return "tool"
+}
+
+func toolAction(name string) string {
+	switch name {
+	case "Bash", "Shell":
+		return "execute"
+	case "Read", "LS", "WebFetch":
+		return "read"
+	case "Glob", "Grep", "WebSearch":
+		return "search"
+	case "Write":
+		return "write"
+	case "Edit", "MultiEdit", "NotebookEdit":
+		return "edit"
+	default:
+		return "invoke"
+	}
+}
+
+func claudeToolBody(raw json.RawMessage) (string, bool, bool, bool) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return "", false, false, false
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text, true, false, false
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(raw, &blocks) != nil {
+		return "", false, false, true
+	}
+	texts := []string{}
+	omitted := false
+	for _, rawBlock := range blocks {
+		var block struct {
+			Type string  `json:"type"`
+			Text *string `json:"text"`
+		}
+		if json.Unmarshal(rawBlock, &block) != nil || block.Type != "text" {
+			omitted = true
+			continue
+		}
+		if block.Text == nil {
+			omitted = true
+			continue
+		}
+		texts = append(texts, *block.Text)
+	}
+	return strings.Join(texts, "\n"), len(texts) > 0, omitted, false
 }
 
 func knownObservationRow(value string) bool {

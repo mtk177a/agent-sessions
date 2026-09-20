@@ -164,9 +164,9 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 - `message`。\
   `role` と秘匿化された `text` を持つ。
 - `tool_call`。\
-  正規化された `call_id` と安全な操作 `category` を持つ。
+  正規化された `call_id`、安全な操作 `category`、任意の `action`、`evidence_state` を持つ。
 - `tool_result`。\
-  関連する `call_id`、`success`、任意の `exit_code` を持つ。
+  関連する `call_id`、`success`、任意の `exit_code` と `excerpt`、`evidence_state`、任意の `redacted` と `truncated` を持つ。
 - `error`。\
   安全な `category` と秘匿化された `message` を持つ。
 
@@ -174,6 +174,19 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 プロバイダーアダプターは、重複、欠落、対応しない相関を、曖昧なイベント列として出力せず、省略として報告する。
 
 生のコマンドと生のツール引数は、公開イベントモデルに含めない。
+
+ツール呼び出しの `action` は `execute`、`read`、`search`、`write`、`edit`、`invoke` のいずれかである。\
+`invoke` はツールが呼び出されたことだけを表す。\
+`action` は `evidence_state` が `available` の場合だけ存在する。\
+ツール結果では、`available` は空でない安全な抜粋、`absent` はソースにテキスト本文がないこと、`unavailable` は本文があるが安全な抜粋を出せないこと、`unsupported` は本文の形式を安全に解釈できないことを表す。\
+同じ四つの状態をツール呼び出しにも使うが、現在のアダプターは正規化したすべての呼び出しに `action` を出力する。
+
+結果の抜粋には、行全体が認識できる `PASS`、`FAIL`、`OK`、`SUCCESS`、または 10 進数の件数と固定の対象語（`test`、`tests`、`check`、`checks`、`assertion`、`assertions`、`error`、`errors`、`failure`、`failures`、`warning`、`warnings`）および結果語（`passed`、`failed`、`skipped`、`found`）から成る行だけを含める。\
+デコーダーは固定語と最大 12 桁の 10 進数から行を再構成し、元の順序を保って、結果を 512 UTF-8 バイト以内に制限する。\
+任意の結果本文、構造化された値、名前、パス、コマンド、引数はコピーしない。\
+`redacted` は条件に合わず除外された内容、`truncated` は抜粋の上限で除外された安全な行を表す。\
+これらのフラグ、および `unavailable` または `unsupported` の結果には `tool_result` 範囲の省略を追加し、`complete` にしない。\
+本文がないことだけでは省略としない。
 
 正規化した呼び出し ID は、`schema_version` とは独立した、アダプターが所有する `v0` アルゴリズム名前空間を使う。\
 プロバイダーの相関識別子は、公開する呼び出し ID ではない。
@@ -284,6 +297,7 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 | JSON の入れ子 | 64 階層 |
 | ソース観測あたりのイベント | 100,000 |
 | 動的出力文字列 | 64 KiB |
+| ツール結果の抜粋 | 512 バイト |
 | ソースまたはイベントあたりのメタデータエントリ | 64 |
 | ソースあたりの関係 | 64 |
 | ページサイズ | 既定 50、最大 100 |
@@ -302,7 +316,7 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 ## 最終秘匿化
 
 すべての動的文字列は、JSON エンコードの直前に最終秘匿化を通る。\
-これには、ソースメタデータ、バージョンヒント、メッセージ、エラーイベント、省略、構造化エラー、診断、ビルドバージョン文字列が含まれる。
+これには、ソースメタデータ、バージョンヒント、メッセージ、ツール結果の抜粋、エラーイベント、省略、構造化エラー、診断、ビルドバージョン文字列が含まれる。
 
 `v1` ポリシーは、認証情報らしい値、認可値、Unix と Windows の絶対パス、UNC パス、ファイル URI、生のホスト名、コマンド形式のテキストを除去する。\
 重要な秘匿化を行った場合は `output_redacted` の省略を追加し、結果を完全な状態にできない。

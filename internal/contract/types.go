@@ -103,15 +103,30 @@ type MessageEvent struct {
 }
 
 type ToolCallEvent struct {
-	CallID   string `json:"call_id"`
-	Category string `json:"category"`
+	CallID        string        `json:"call_id"`
+	Category      string        `json:"category"`
+	Action        string        `json:"action,omitempty"`
+	EvidenceState EvidenceState `json:"evidence_state"`
 }
 
 type ToolResultEvent struct {
-	CallID   string `json:"call_id"`
-	Success  bool   `json:"success"`
-	ExitCode *int   `json:"exit_code,omitempty"`
+	CallID        string        `json:"call_id"`
+	Success       bool          `json:"success"`
+	ExitCode      *int          `json:"exit_code,omitempty"`
+	Excerpt       string        `json:"excerpt,omitempty"`
+	EvidenceState EvidenceState `json:"evidence_state"`
+	Redacted      bool          `json:"redacted,omitempty"`
+	Truncated     bool          `json:"truncated,omitempty"`
 }
+
+type EvidenceState string
+
+const (
+	EvidenceAvailable   EvidenceState = "available"
+	EvidenceAbsent      EvidenceState = "absent"
+	EvidenceUnavailable EvidenceState = "unavailable"
+	EvidenceUnsupported EvidenceState = "unsupported"
+)
 
 type ErrorEvent struct {
 	Category string `json:"category"`

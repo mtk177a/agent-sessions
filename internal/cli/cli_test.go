@@ -97,7 +97,7 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := *eventEnvelope.Data.Events
-	if events[1].ToolCall.CallID != "call-1" || events[2].ToolResult.CallID != "call-1" || !events[2].ToolResult.Success || events[2].ToolResult.ExitCode == nil || *events[2].ToolResult.ExitCode != 0 {
+	if events[1].ToolCall.CallID != "call-1" || events[1].ToolCall.Action != "read" || events[1].ToolCall.EvidenceState != contract.EvidenceAvailable || events[2].ToolResult.CallID != "call-1" || !events[2].ToolResult.Success || events[2].ToolResult.ExitCode == nil || *events[2].ToolResult.ExitCode != 0 || events[2].ToolResult.EvidenceState != contract.EvidenceAbsent {
 		t.Fatalf("tool relationship evidence was not preserved: %#v", events)
 	}
 
@@ -495,8 +495,8 @@ func newSyntheticAdapter() *syntheticAdapter {
 		},
 		events: []contract.Event{
 			{Index: 0, Kind: contract.EventMessage, Message: &contract.MessageEvent{Role: "user", Text: "Hello"}, Metadata: []contract.Metadata{}},
-			{Index: 1, Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "filesystem"}, Metadata: []contract.Metadata{}},
-			{Index: 2, Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true, ExitCode: &exitCode}, Metadata: []contract.Metadata{}},
+			{Index: 1, Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "filesystem", Action: "read", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},
+			{Index: 2, Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true, ExitCode: &exitCode, EvidenceState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
 		},
 	}
 }
@@ -582,11 +582,29 @@ func snapshot(t *testing.T, root string) map[string]snapshotEntry {
 
 func TestNormalizeAndValidateEventsRejectsDuplicateToolResults(t *testing.T) {
 	events := []contract.Event{
-		{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool"}, Metadata: []contract.Metadata{}},
-		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true}, Metadata: []contract.Metadata{}},
-		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: false}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool", Action: "invoke", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true, EvidenceState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: false, EvidenceState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
 	}
 	if err := normalizeAndValidateEvents(events); err == nil {
 		t.Fatal("normalizeAndValidateEvents() accepted duplicate tool results")
+	}
+}
+
+func TestNormalizeAndValidateEventsRejectsUnsafeExcerpt(t *testing.T) {
+	events := []contract.Event{
+		{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "shell", Action: "execute", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true, Excerpt: "PASS /fictional/private", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},
+	}
+	if err := normalizeAndValidateEvents(events); err == nil {
+		t.Fatal("unsafe tool excerpt was accepted")
+	}
+	events[1].ToolResult.Excerpt = "PASS"
+	events[1].ToolResult.Redacted = true
+	if err := normalizeAndValidateEvents(events); err != nil {
+		t.Fatalf("safe excerpt was rejected: %v", err)
+	}
+	if err := validateToolEvidenceOmissions(events, nil); err == nil {
+		t.Fatal("redacted evidence without an omission was accepted")
 	}
 }

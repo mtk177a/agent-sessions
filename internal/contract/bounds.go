@@ -178,10 +178,22 @@ func boundEvent(event *Event) (bool, error) {
 		if err := requireBoundedString(event.ToolCall.Category); err != nil {
 			return false, err
 		}
+		if err := requireBoundedString(event.ToolCall.Action); err != nil {
+			return false, err
+		}
+		if err := requireBoundedString(string(event.ToolCall.EvidenceState)); err != nil {
+			return false, err
+		}
 	}
 	if event.ToolResult != nil {
 		if err := requireBoundedString(event.ToolResult.CallID); err != nil {
 			return false, err
+		}
+		if err := requireBoundedString(string(event.ToolResult.EvidenceState)); err != nil {
+			return false, err
+		}
+		if len(event.ToolResult.Excerpt) > MaxToolExcerptBytes {
+			return false, ErrStructuralStringBound
 		}
 	}
 	if event.Error != nil {

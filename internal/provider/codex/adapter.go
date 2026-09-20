@@ -71,6 +71,21 @@ type rolloutLine struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 
+type completedItem struct {
+	Type             string                        `json:"type"`
+	ID               string                        `json:"id"`
+	Content          []struct{ Type, Text string } `json:"content"`
+	Status           string                        `json:"status"`
+	ExitCode         *int                          `json:"exit_code"`
+	Stdout           *string                       `json:"stdout"`
+	Stderr           *string                       `json:"stderr"`
+	AggregatedOutput *string                       `json:"aggregated_output"`
+	FormattedOutput  *string                       `json:"formatted_output"`
+	Result           json.RawMessage               `json:"result"`
+	ContentItems     json.RawMessage               `json:"content_items"`
+	Error            json.RawMessage               `json:"error"`
+}
+
 type discovery struct {
 	byFingerprint map[string][]artifact
 	omissions     []contract.Omission
@@ -417,13 +432,7 @@ func normalizeRowsVersion(threadID, historyMode, version string, data []byte) ([
 				events = append(events, contract.Event{Kind: contract.EventError, Error: &contract.ErrorEvent{Category: "provider", Message: event.Message}, Metadata: []contract.Metadata{}})
 			case "item_completed":
 				if historyMode == "paginated" {
-					var item struct {
-						Type     string                        `json:"type"`
-						ID       string                        `json:"id"`
-						Content  []struct{ Type, Text string } `json:"content"`
-						Status   string                        `json:"status"`
-						ExitCode *int                          `json:"exit_code"`
-					}
+					var item completedItem
 					if json.Unmarshal(event.Item, &item) != nil {
 						omissions = append(omissions, omission("malformed_record", "events", "A completed Codex item could not be decoded."))
 						continue
@@ -460,9 +469,15 @@ func normalizeRowsVersion(threadID, historyMode, version string, data []byte) ([
 						completedItems[item.ID] = struct{}{}
 						category := map[string]string{"CommandExecution": "shell", "McpToolCall": "mcp", "DynamicToolCall": "tool"}[item.Type]
 						callID := normalizedCallID(threadID, item.ID)
-						events = append(events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category}, Metadata: []contract.Metadata{}})
+						action := "invoke"
+						if item.Type == "CommandExecution" {
+							action = "execute"
+						}
+						events = append(events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}})
 						success := item.Status == "completed" || item.ExitCode != nil && *item.ExitCode == 0
-						events = append(events, contract.Event{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: callID, Success: success, ExitCode: item.ExitCode}, Metadata: []contract.Metadata{}})
+						toolResult := codexToolResult(item, callID, success)
+						events = append(events, contract.Event{Kind: contract.EventToolResult, ToolResult: &toolResult, Metadata: []contract.Metadata{}})
+						omissions = append(omissions, contract.ToolResultOmissions(toolResult)...)
 					default:
 						if knownTurnItemType(item.Type) {
 							omissions = append(omissions, omission("unsupported_event", "events", "A recognized Codex item is not represented by the public event model."))
@@ -503,7 +518,13 @@ func normalizeRowsVersion(threadID, historyMode, version string, data []byte) ([
 				} else if item.Name == "apply_patch" {
 					category = "file_change"
 				}
-				events = append(events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category}, Metadata: []contract.Metadata{}})
+				action := "invoke"
+				if category == "shell" {
+					action = "execute"
+				} else if category == "file_change" {
+					action = "edit"
+				}
+				events = append(events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}})
 			case "function_call_output", "custom_tool_call_output":
 				if normalized, ok := calls[item.CallID]; ok && normalized != "" {
 					omissions = append(omissions, omission("unsupported_tool_result", "events", "A correlated tool result did not expose a safe success value."))
@@ -524,6 +545,124 @@ func normalizeRowsVersion(threadID, historyMode, version string, data []byte) ([
 		omissions = append(omissions, omission("resource_limit", "events", "The normalized event count exceeded the input limit."))
 	}
 	return events, omissions
+}
+
+func codexToolResult(item completedItem, callID string, success bool) contract.ToolResultEvent {
+	result := contract.ToolResultEvent{CallID: callID, Success: success, ExitCode: item.ExitCode}
+	var body string
+	present, omitted, unsupported := false, false, false
+	switch item.Type {
+	case "CommandExecution":
+		if item.AggregatedOutput != nil && *item.AggregatedOutput != "" {
+			body, present = *item.AggregatedOutput, true
+		} else {
+			if item.Stdout != nil {
+				body, present = *item.Stdout, true
+			}
+			if item.Stderr != nil {
+				if body != "" && *item.Stderr != "" {
+					body += "\n"
+				}
+				body += *item.Stderr
+				present = true
+			}
+			if body == "" && item.FormattedOutput != nil {
+				body, present = *item.FormattedOutput, true
+			}
+		}
+	case "McpToolCall":
+		if hasJSONValue(item.Result) {
+			var payload struct {
+				Content           json.RawMessage `json:"content"`
+				StructuredContent json.RawMessage `json:"structuredContent"`
+			}
+			if json.Unmarshal(item.Result, &payload) != nil {
+				unsupported = true
+			} else {
+				body, present, omitted, unsupported = codexTextBlocks(payload.Content, "text")
+				omitted = omitted || hasJSONValue(payload.StructuredContent)
+			}
+		}
+		if hasJSONValue(item.Error) {
+			var payload struct {
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(item.Error, &payload) != nil {
+				unsupported = true
+			} else {
+				if body != "" && payload.Message != "" {
+					body += "\n"
+				}
+				body += payload.Message
+				present = true
+			}
+		}
+	case "DynamicToolCall":
+		if hasJSONValue(item.ContentItems) {
+			body, present, omitted, unsupported = codexTextBlocks(item.ContentItems, "inputText")
+		}
+		if hasJSONValue(item.Error) {
+			var errorText string
+			if json.Unmarshal(item.Error, &errorText) != nil {
+				unsupported = true
+			} else {
+				if body != "" && errorText != "" {
+					body += "\n"
+				}
+				body += errorText
+				present = true
+			}
+		}
+	}
+	result.Excerpt, result.EvidenceState, result.Redacted, result.Truncated = contract.SafeToolExcerpt(body, present)
+	result.Redacted = result.Redacted || omitted
+	if omitted && result.EvidenceState == contract.EvidenceAbsent {
+		result.EvidenceState = contract.EvidenceUnavailable
+	}
+	if unsupported {
+		if result.EvidenceState != contract.EvidenceAvailable {
+			result.EvidenceState = contract.EvidenceUnsupported
+		} else {
+			result.Redacted = true
+		}
+	}
+	return result
+}
+
+func hasJSONValue(raw json.RawMessage) bool {
+	return len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
+func codexTextBlocks(raw json.RawMessage, textType string) (string, bool, bool, bool) {
+	if !hasJSONValue(raw) {
+		return "", false, false, false
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(raw, &blocks) != nil {
+		return "", false, false, true
+	}
+	texts := []string{}
+	omitted := false
+	for _, rawBlock := range blocks {
+		var block struct {
+			Type string  `json:"type"`
+			Text *string `json:"text"`
+		}
+		if json.Unmarshal(rawBlock, &block) != nil || block.Type == "" {
+			omitted = true
+			continue
+		}
+		if block.Type != textType {
+			omitted = true
+			continue
+		}
+		if block.Text == nil {
+			omitted = true
+			continue
+		}
+		texts = append(texts, *block.Text)
+	}
+	return strings.Join(texts, "\n"), len(texts) > 0, omitted, false
 }
 
 func inspectRows(historyMode string, data []byte) ([]rolloutLine, []contract.Omission) {

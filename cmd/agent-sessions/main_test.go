@@ -294,7 +294,7 @@ func writeClaudeTranscript(t *testing.T, root string) {
 	path := filepath.Join(root, "projects", "fictional-project", sessionID+".jsonl")
 	content := fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:00Z","type":"user","sessionId":%q,"uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","version":"2.1.228","message":{"role":"user","content":"hello"}}`, sessionID) + "\n" +
 		fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:01Z","type":"assistant","sessionId":%q,"uuid":"bbbbbbbb-cccc-4ddd-8eee-ffffffffffff","version":"2.1.228","message":{"role":"assistant","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"provider-call","name":"Bash","input":{"command":"must not escape"}}]}}`, sessionID) + "\n" +
-		fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:02Z","type":"user","sessionId":%q,"uuid":"cccccccc-dddd-4eee-8fff-000000000000","version":"2.1.228","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"provider-call","content":"private output","is_error":false}]}}`, sessionID) + "\n" +
+		fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:02Z","type":"user","sessionId":%q,"uuid":"cccccccc-dddd-4eee-8fff-000000000000","version":"2.1.228","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"provider-call","content":"PASS","is_error":false}]}}`, sessionID) + "\n" +
 		fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:03Z","type":"assistant","sessionId":%q,"uuid":"dddddddd-eeee-4fff-8000-111111111111","version":"2.1.228","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"fictional provider failure"}],"stop_reason":"error"}}`, sessionID) + "\n"
 	writeFixture(t, path, content)
 }

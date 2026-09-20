@@ -39,7 +39,7 @@ func TestPaginatedHistoryUsesCompletedItemsAsCanonicalRows(t *testing.T) {
 		t.Fatalf("canonical messages = %#v", result.Events[:2])
 	}
 	call, toolResult := result.Events[2].ToolCall, result.Events[3].ToolResult
-	if call == nil || toolResult == nil || call.CallID != toolResult.CallID || call.CallID == "command-1" || !contract.ValidIdentifier(call.CallID) {
+	if call == nil || toolResult == nil || call.CallID != toolResult.CallID || call.CallID == "command-1" || !contract.ValidIdentifier(call.CallID) || call.Action != "execute" || call.EvidenceState != contract.EvidenceAvailable || toolResult.EvidenceState != contract.EvidenceAbsent {
 		t.Fatalf("normalized tool pair = %#v", result.Events[2:])
 	}
 	encoded, err := json.Marshal(result.Events)
@@ -50,6 +50,67 @@ func TestPaginatedHistoryUsesCompletedItemsAsCanonicalRows(t *testing.T) {
 		if bytes.Contains(encoded, []byte(forbidden)) {
 			t.Fatalf("normalized events exposed %q", forbidden)
 		}
+	}
+}
+
+func TestPaginatedToolEvidenceUsesSafeResultLines(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.153.0", "paginated", ""),
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"private","aggregated_output":"PASS\n3 tests passed\nsecret-token: fictional"}}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "tool_excerpt_redacted") {
+		t.Fatalf("Events() = %#v", result)
+	}
+	call, outcome := result.Events[0].ToolCall, result.Events[1].ToolResult
+	if call == nil || call.Action != "execute" || call.EvidenceState != contract.EvidenceAvailable || outcome == nil || outcome.Excerpt != "PASS\n3 tests passed" || outcome.EvidenceState != contract.EvidenceAvailable || !outcome.Redacted {
+		t.Fatalf("tool evidence = %#v", result.Events)
+	}
+}
+
+func TestPaginatedStructuredToolResults(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.153.0", "paginated", ""),
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp-1","status":"completed","result":{"content":[{"type":"text","text":"OK"}]}}}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"DynamicToolCall","id":"dynamic-1","status":"completed","content_items":[{"type":"inputText","text":"2 checks passed"}]}}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"DynamicToolCall","id":"dynamic-2","status":"completed","content_items":{"unexpected":"PASS"}}}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 6 || !hasOmission(result.Omissions, "tool_excerpt_unsupported") {
+		t.Fatalf("Events() status = %s, events = %d, omissions = %#v", result.Status, len(result.Events), result.Omissions)
+	}
+	if result.Events[0].ToolCall.Action != "invoke" || result.Events[1].ToolResult.Excerpt != "OK" || result.Events[2].ToolCall.Action != "invoke" || result.Events[3].ToolResult.Excerpt != "2 checks passed" || result.Events[5].ToolResult.EvidenceState != contract.EvidenceUnsupported {
+		t.Fatalf("structured tool evidence = %#v", result.Events)
+	}
+}
+
+func TestCommandResultUsesPersistedTextFallback(t *testing.T) {
+	empty, pass, failure := "", "PASS", "FAIL"
+	result := codexToolResult(completedItem{Type: "CommandExecution", AggregatedOutput: &empty, Stdout: &pass, Stderr: &failure}, "call-1", false)
+	if result.Excerpt != "PASS\nFAIL" || result.EvidenceState != contract.EvidenceAvailable || result.Redacted {
+		t.Fatalf("stream result = %#v", result)
+	}
+	result = codexToolResult(completedItem{Type: "CommandExecution", FormattedOutput: &pass}, "call-2", true)
+	if result.Excerpt != "PASS" || result.EvidenceState != contract.EvidenceAvailable {
+		t.Fatalf("formatted result = %#v", result)
+	}
+}
+
+func TestPaginatedToolExcerptTruncationIsPartial(t *testing.T) {
+	home := t.TempDir()
+	output, err := json.Marshal(strings.Repeat("3 tests passed\n", 60))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.153.0", "paginated", ""),
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"aggregated_output":` + string(output) + `}}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "tool_excerpt_truncated") || !result.Events[1].ToolResult.Truncated || len(result.Events[1].ToolResult.Excerpt) > contract.MaxToolExcerptBytes {
+		t.Fatalf("bounded tool evidence = %#v", result)
 	}
 }
 

@@ -209,6 +209,9 @@ func (r Runner) runEvents(ctx context.Context, args []string, output io.Writer) 
 	if err := normalizeAndValidateEvents(result.Events); err != nil {
 		return r.writeError(output, "events", ExitFailure, "invalid_provider_result", "provider", "The provider returned invalid normalized events.")
 	}
+	if err := validateToolEvidenceOmissions(result.Events, result.Omissions); err != nil {
+		return r.writeError(output, "events", ExitFailure, "invalid_provider_result", "provider", "The provider returned inconsistent tool evidence.")
+	}
 	events, next, pageOmission, err := paginateEvents(result.Events, offset, *limit)
 	if err != nil {
 		return r.writeError(output, "events", ExitUsage, "invalid_cursor", "usage", "The page cursor is outside the available result.")
@@ -568,7 +571,7 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 				return errors.New("invalid message event")
 			}
 		case contract.EventToolCall:
-			if event.ToolCall == nil || !contract.ValidIdentifier(event.ToolCall.CallID) || !contract.ValidToken(event.ToolCall.Category) {
+			if event.ToolCall == nil || !contract.ValidIdentifier(event.ToolCall.CallID) || !contract.ValidToken(event.ToolCall.Category) || event.ToolCall.EvidenceState != "" && !contract.ValidEvidenceState(event.ToolCall.EvidenceState) || (event.ToolCall.EvidenceState == contract.EvidenceAvailable) != (event.ToolCall.Action != "") || event.ToolCall.Action != "" && !contract.ValidToolAction(event.ToolCall.Action) {
 				return errors.New("invalid tool call event")
 			}
 			if _, exists := calls[event.ToolCall.CallID]; exists {
@@ -576,7 +579,7 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 			}
 			calls[event.ToolCall.CallID] = struct{}{}
 		case contract.EventToolResult:
-			if event.ToolResult == nil {
+			if event.ToolResult == nil || event.ToolResult.EvidenceState != "" && !contract.ValidEvidenceState(event.ToolResult.EvidenceState) || (event.ToolResult.EvidenceState == contract.EvidenceAvailable) != (event.ToolResult.Excerpt != "") || (event.ToolResult.EvidenceState == "" || event.ToolResult.EvidenceState == contract.EvidenceAbsent) && (event.ToolResult.Redacted || event.ToolResult.Truncated) || event.ToolResult.Truncated && event.ToolResult.EvidenceState != contract.EvidenceAvailable || event.ToolResult.Excerpt != "" && !contract.ValidSafeToolExcerpt(event.ToolResult.Excerpt) {
 				return errors.New("invalid tool result event")
 			}
 			if _, exists := calls[event.ToolResult.CallID]; !exists {
@@ -597,6 +600,27 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 			if !contract.ValidToken(metadata.Name) {
 				return errors.New("invalid event metadata name")
 			}
+		}
+	}
+	return nil
+}
+
+func validateToolEvidenceOmissions(events []contract.Event, omissions []contract.Omission) error {
+	available := map[string]int{}
+	for _, omission := range omissions {
+		if omission.Scope == "tool_result" {
+			available[omission.Code]++
+		}
+	}
+	for _, event := range events {
+		if event.ToolResult == nil {
+			continue
+		}
+		for _, required := range contract.ToolResultOmissions(*event.ToolResult) {
+			if available[required.Code] == 0 {
+				return errors.New("tool evidence lacks a matching omission")
+			}
+			available[required.Code]--
 		}
 	}
 	return nil

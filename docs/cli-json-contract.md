@@ -154,14 +154,29 @@ Each event requires `index`, `kind`, exactly one typed event payload, and bounde
 Supported kinds are:
 
 - `message`, with `role` and redacted `text`;
-- `tool_call`, with a normalized `call_id` and safe operation `category`;
-- `tool_result`, with the related `call_id`, `success`, and optional `exit_code`;
+- `tool_call`, with a normalized `call_id`, safe operation `category`, and optional `action` and `evidence_state`;
+- `tool_result`, with the related `call_id`, `success`, and optional `exit_code`, `excerpt`, `evidence_state`, `redacted`, and `truncated` fields;
 - `error`, with a safe `category` and redacted `message`.
 
 A tool result must reference one earlier unique tool call, and at most one normalized result may reference a call.\
 Provider adapters report duplicate, missing, or unmatched correlation as an omission instead of emitting an ambiguous event sequence.
 
 Raw commands and raw tool arguments are not part of the public event model.
+
+`evidence_state` is optional for compatibility with earlier `v1` responses.\
+When it is omitted, the evidence state was not reported; consumers must not interpret its omission as `absent`.\
+An event without `evidence_state` also has no `action`, `excerpt`, `redacted`, or `truncated` field.
+
+Tool call `action` is one of `execute`, `read`, `search`, `write`, `edit`, or `invoke`; `invoke` means only that a tool was called.\
+The action is present only when `evidence_state` is `available`.\
+For a tool result, `available` means a non-empty safe excerpt, `absent` means no source text body, `unavailable` means a body exists but no safe excerpt can be emitted, and `unsupported` means the body shape cannot be interpreted safely.\
+The same four states apply to tool calls, though current adapters emit an action for every normalized call.
+
+Result excerpts contain only recognized whole lines: `PASS`, `FAIL`, `OK`, `SUCCESS`, or a decimal count followed by a fixed item word (`test`, `tests`, `check`, `checks`, `assertion`, `assertions`, `error`, `errors`, `failure`, `failures`, `warning`, `warnings`) and outcome word (`passed`, `failed`, `skipped`, `found`).\
+The decoder reconstructs these lines from fixed words and at most 12 decimal digits, preserves their order, and limits the result to 512 UTF-8 bytes.\
+It does not copy arbitrary result text, structured values, names, paths, commands, or arguments.\
+`redacted` reports excluded non-eligible content; `truncated` reports safe lines excluded by the excerpt limit.\
+These flags and unavailable or unsupported result evidence add `tool_result` omissions and prevent `complete`; an absent body alone does not.
 
 Normalized call IDs use an adapter-owned `v0` algorithm namespace independent from `schema_version`.\
 Provider correlation identifiers are not public call IDs.
@@ -271,6 +286,7 @@ It does not create or update that file.
 | JSON nesting | 64 levels |
 | Events per source observation | 100,000 |
 | Dynamic output string | 64 KiB |
+| Tool result excerpt | 512 bytes |
 | Metadata entries per source or event | 64 |
 | Relationships per source | 64 |
 | Page size | default 50, maximum 100 |
@@ -289,7 +305,7 @@ Oversized structural identifiers fail closed with a structured resource error in
 ## Final redaction
 
 All dynamic strings pass through final redaction immediately before JSON encoding.\
-This includes source metadata, version hints, messages, error events, omissions, structured errors, diagnostics, and build-version strings.
+This includes source metadata, version hints, messages, tool result excerpts, error events, omissions, structured errors, diagnostics, and build-version strings.
 
 The `v1` policy removes credential-like values, authorization values, absolute Unix and Windows paths, UNC paths, file URIs, raw hostnames, and command-shaped text.\
 Any material redaction adds an `output_redacted` omission and prevents a complete result.

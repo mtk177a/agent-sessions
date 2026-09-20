@@ -54,7 +54,9 @@ Duplicate calls, duplicate results, unmatched results, and calls without persist
 The result `success` value is derived only from the verified `tool_result.is_error` semantics: absent or `false` means success, and `true` means failure.
 
 Public tool categories are limited to `shell`, `filesystem`, `file_change`, `mcp`, and `tool`.\
-Raw commands, tool input, tool output, arbitrary provider tool names, provider correlation identifiers, and absolute paths are not exposed as public structural values.
+Known tool names map to `execute`, `read`, `search`, `write`, or `edit`; other confirmed calls map to `invoke`.\
+String and text-block tool results use the common safe excerpt policy; non-text blocks and unsafe lines are excluded and reduce completeness.\
+Raw commands, tool input, unrestricted tool output, arbitrary provider tool names, provider correlation identifiers, and absolute paths are not exposed as public structural values.
 
 ## Subagents and sidecars
 

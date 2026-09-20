@@ -39,6 +39,13 @@ For paginated history, completed `UserMessage`, `AgentMessage`, `CommandExecutio
 Tool call identifiers are deterministic adapter-owned hashes of the thread identity and provider correlation identifier.\
 Public categories are limited to `shell`, `file_change`, `mcp`, and `tool`; raw commands, arguments, tool payloads, and arbitrary provider tool names are not normalized into public structural fields.
 
+Completed command items emit `execute`; completed MCP and dynamic tool items emit `invoke`.\
+Known legacy shell and patch calls emit `execute` and `edit`, while other correlated calls emit `invoke`.\
+For completed command items, the excerpt reader prefers non-empty `aggregated_output`, then `stdout` and `stderr`, then `formatted_output`.\
+For completed MCP and dynamic tool items, it reads text content blocks and excludes structured or non-text content.\
+Only lines permitted by the common safe excerpt policy appear in the public result; omitted content and unsupported body shapes reduce completeness.\
+Legacy persisted output still cannot produce a normalized result because it lacks a safe success value.
+
 Errors are normalized from explicit provider error events.\
 Parent and fork relationships are emitted only from explicit `parent_thread_id` and `forked_from_id` metadata.
 

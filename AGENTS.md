@@ -117,7 +117,7 @@ This includes:
 - README and documentation;
 - ADRs;
 - CLI help and diagnostics;
-- commit messages;
+- commit-message summaries;
 - release notes;
 - repository policy files.
 

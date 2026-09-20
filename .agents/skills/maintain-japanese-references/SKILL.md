@@ -14,6 +14,7 @@ If the versions differ, the English file prevails.
 
 This Skill covers only the nine explicit pairs in `docs/localization.md`.\
 It does not author Issues or pull requests, translate ADRs or other unlisted files, or change an English canonical file as part of translation maintenance.
+If a request only asks for Issue or pull request content and no maintained English file changed, report that the request is outside this Skill and do not draft the tracker content in this workflow.
 
 ## Workflow
 
@@ -27,6 +28,7 @@ Each Japanese reference must identify its English source and state that the Engl
 Use only the pairs affected by the English change; do not rewrite unrelated translations.\
 Do not add an explanation, example, policy, or claim absent from the English source.\
 If English meaning or established Japanese terminology is materially ambiguous, report the pair and ambiguity instead of guessing; continue with independent pairs when possible.
+A generic translation or transliteration does not resolve ambiguity between materially different meanings; report the missing context even if the Japanese wording remains neutral.
 
 ## Report
 

@@ -193,6 +193,17 @@ A file system location is not source identity.
 
 A provider-controlled move between locations does not by itself create a new logical source when the underlying provider identity remains unchanged.
 
+### Source interaction time
+
+`last_interaction_at` is the latest validated timestamp of a recorded user or assistant message, tool call, or tool result in one logical source.\
+Provider adapters derive it from bounded provider-owned records and normalize it to UTC.\
+Provider metadata, system notifications, and file modification time do not advance it.\
+For ChatGPT Data Export, the selected active conversation branch defines which interactions are considered.
+
+The field is absent when an adapter cannot establish the latest interaction safely.\
+`list` or `show` then reports an omission and is not `complete`; a partial listing cannot establish an exhaustive time cohort.\
+Consumers may collect all `list` pages, apply an absolute cutoff, and sort eligible sources by time descending and `source_ref` ascending without changing the CLI's source-reference pagination order.
+
 ### Interaction
 
 The logical conversation or work interaction represented by a source.\
@@ -456,6 +467,9 @@ source access:
   read only what the requested operation requires
   avoid complete-history reads when cheaper metadata can narrow the source set
 ```
+
+Codex and Claude Code `list` now read bounded main transcripts to establish interaction time.\
+This increases read work but causes no persistent `agent-sessions` writes.
 
 Performance optimization must not introduce periodic whole-history scans merely to reduce interactive latency.\
 Changes that introduce persistent I/O require direct measurement on the affected operating systems and realistic source volumes.

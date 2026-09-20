@@ -67,7 +67,7 @@ func TestUnknownAndMalformedRowsDegradeCompleteness(t *testing.T) {
 	adapter := New()
 	source := config.Source{ID: "archive", Provider: "codex", Root: home}
 	listed := adapter.List(context.Background(), source)
-	if listed.Status != contract.StatusComplete || len(listed.Sources) != 1 {
+	if listed.Status != contract.StatusPartial || len(listed.Sources) != 1 || !hasOmission(listed.Omissions, "source_time_unavailable") {
 		t.Fatalf("List() = %#v", listed)
 	}
 	events := adapter.Events(context.Background(), source, listed.Sources[0].Identity.ProviderSourceFingerprint)

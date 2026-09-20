@@ -66,8 +66,9 @@ type historyPosition struct {
 }
 
 type rolloutLine struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+	Timestamp string          `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
 }
 
 type discovery struct {
@@ -99,17 +100,29 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 	}
 	sources := make([]contract.Source, 0, len(discovered.byFingerprint))
 	omissions := append([]contract.Omission{}, discovered.omissions...)
+	missingTimes := 0
 	for _, candidates := range discovered.byFingerprint {
 		selected, ambiguous := selectArtifact(candidates)
 		if ambiguous {
 			omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
 		}
 		itemSource, relationshipOmissions := makeSource(source, selected)
+		if !ambiguous && isSupportedVersion(selected.meta.CLIVersion) {
+			if value, ok := readLastInteractionAt(source.Root, selected); ok {
+				itemSource.LastInteractionAt = &value
+			}
+		}
+		if itemSource.LastInteractionAt == nil {
+			missingTimes++
+		}
 		sources = append(sources, itemSource)
 		omissions = append(omissions, relationshipOmissions...)
-		if selected.meta.CLIVersion != supportedVersion {
+		if !isSupportedVersion(selected.meta.CLIVersion) {
 			omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
 		}
+	}
+	if missingTimes > 0 {
+		omissions = append(omissions, contract.Omission{Code: "source_time_unavailable", Scope: "source", Count: missingTimes, Message: "A Codex source interaction time could not be established safely."})
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Identity.SourceRef < sources[j].Identity.SourceRef })
 	status := statusFor(omissions)
@@ -133,10 +146,18 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 	if ambiguous {
 		omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
 	}
-	if selected.meta.CLIVersion != supportedVersion {
+	if !isSupportedVersion(selected.meta.CLIVersion) {
 		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
 	}
 	itemSource, relationshipOmissions := makeSource(source, selected)
+	if !ambiguous && isSupportedVersion(selected.meta.CLIVersion) {
+		if value, ok := readLastInteractionAt(source.Root, selected); ok {
+			itemSource.LastInteractionAt = &value
+		}
+	}
+	if itemSource.LastInteractionAt == nil {
+		omissions = append(omissions, omission("source_time_unavailable", "source", "A Codex source interaction time could not be established safely."))
+	}
 	omissions = append(omissions, relationshipOmissions...)
 	return provider.SourceResult{Status: statusFor(omissions), Sources: []contract.Source{itemSource}, Omissions: omissions}
 }
@@ -156,7 +177,7 @@ func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint st
 	if err != nil {
 		return provider.EventResult{Err: err}
 	}
-	events, rowOmissions := normalizeRows(selected.threadID, selected.meta.HistoryMode, data)
+	events, rowOmissions := normalizeRowsVersion(selected.threadID, selected.meta.HistoryMode, selected.meta.CLIVersion, data)
 	omissions = append(omissions, rowOmissions...)
 	if selected.meta.HistoryBase != nil {
 		omissions = append(omissions, omission("unsupported_format", "events", "Referenced rollout history is not included in this observation."))
@@ -182,7 +203,7 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 	if err != nil {
 		return provider.EvidenceResult{Err: err}
 	}
-	_, formatOmissions := inspectRows(selected.meta.HistoryMode, data)
+	_, formatOmissions := inspectRowsVersion(selected.meta.HistoryMode, selected.meta.CLIVersion, data)
 	omissions = append(omissions, formatOmissions...)
 	if selected.meta.HistoryBase != nil {
 		omissions = append(omissions, omission("unsupported_format", "verification", "Referenced rollout history is not included in this verification."))
@@ -208,7 +229,7 @@ func (a *Adapter) find(source config.Source, fingerprint string) (artifact, []co
 	if ambiguous {
 		return artifact{}, nil, errAmbiguousArtifact
 	}
-	if selected.meta.CLIVersion != supportedVersion {
+	if !isSupportedVersion(selected.meta.CLIVersion) {
 		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
 	}
 	return selected, omissions, nil
@@ -364,7 +385,11 @@ func canonicalThreadID(value string) (string, bool) {
 }
 
 func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event, []contract.Omission) {
-	lines, omissions := inspectRows(historyMode, data)
+	return normalizeRowsVersion(threadID, historyMode, supportedVersion, data)
+}
+
+func normalizeRowsVersion(threadID, historyMode, version string, data []byte) ([]contract.Event, []contract.Omission) {
+	lines, omissions := inspectRowsVersion(historyMode, version, data)
 	events := []contract.Event{}
 	calls := map[string]string{}
 	completedItems := map[string]struct{}{}
@@ -502,6 +527,10 @@ func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event,
 }
 
 func inspectRows(historyMode string, data []byte) ([]rolloutLine, []contract.Omission) {
+	return inspectRowsVersion(historyMode, supportedVersion, data)
+}
+
+func inspectRowsVersion(historyMode, version string, data []byte) ([]rolloutLine, []contract.Omission) {
 	lines := []rolloutLine{}
 	omissions := []contract.Omission{}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -510,6 +539,9 @@ func inspectRows(historyMode string, data []byte) ([]rolloutLine, []contract.Omi
 		var line rolloutLine
 		if err := safeio.DecodeJSON(scanner.Bytes(), contract.MaxJSONDepth, &line); err != nil {
 			omissions = append(omissions, omission("malformed_record", "events", "A Codex JSONL row could not be decoded."))
+			continue
+		}
+		if version == "0.153.0" && line.Type == "token_usage_record" {
 			continue
 		}
 		if !knownTopLevel(line.Type) {
@@ -575,6 +607,10 @@ func knownTopLevel(value string) bool {
 	default:
 		return false
 	}
+}
+
+func isSupportedVersion(value string) bool {
+	return value == supportedVersion || value == "0.153.0"
 }
 
 func knownEventType(value string) bool {

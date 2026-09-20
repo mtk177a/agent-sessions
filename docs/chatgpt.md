@@ -2,6 +2,9 @@
 
 The `chatgpt` provider adapter reads a user-requested ChatGPT Data Export ZIP and maps conversations into the provider-neutral stable `v1` CLI contract.
 
+`list` and `show` expose `last_interaction_at` when the selected conversation branch establishes the latest interaction time.\
+If they cannot establish it, they omit the field and return `partial` with `source_time_unavailable`; `events` and `verify` retain their existing completeness rules.
+
 OpenAI documents how users request a Data Export and that the downloaded ZIP contains chat history.\
 OpenAI does not document the archive's conversation JSON graph as a stable API, so every internal member name and field used for normalization remains an adapter-owned compatibility boundary.
 
@@ -47,6 +50,11 @@ It accepts a consistent `id` or `conversation_id` as provider-native conversatio
 
 For `events`, the adapter starts at the conversation's current node, follows parent links to the root, reverses that chain, and emits supported observations in chronological order.\
 Text and multimodal-text string parts from `user` and `assistant` messages become normalized message events.
+
+For `last_interaction_at`, the adapter uses `create_time` on recognized `user` and `assistant` text or multimodal-text messages and recognized tool-role results on that same branch.\
+It converts numeric Unix seconds exactly to a UTC timestamp and uses the latest value, including interactions after a resumed conversation.\
+Assistant `thoughts` and `reasoning_recap`, other branches, conversation `update_time`, and ZIP file modification time do not advance the field.\
+An invalid branch, an unknown potentially interactive record, a missing or invalid interaction time, or no interaction leaves the field absent; `list` aggregates the number of affected conversations in one omission.
 
 Nodes outside the active chain are omitted with `non_active_branch`.\
 Tool-role results are omitted with `correlation_omitted` because the accepted export shape does not provide a stable provider-neutral call/result relationship at this boundary.\

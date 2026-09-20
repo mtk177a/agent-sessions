@@ -27,6 +27,7 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 	before := snapshot(t, root)
 
 	adapter := newSyntheticAdapter()
+	interactionTime := "2026-09-03T10:00:00Z"
 	registry := provider.NewRegistry(adapter)
 	runner := Runner{Version: "test", Registry: registry}
 	ref := adapter.source.Identity.SourceRef
@@ -65,9 +66,15 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 				if envelope.Data == nil || envelope.Data.Sources == nil || len(*envelope.Data.Sources) != 1 {
 					t.Fatalf("list contract is incomplete: %#v", envelope.Data)
 				}
+				if got := (*envelope.Data.Sources)[0].LastInteractionAt; got == nil || *got != interactionTime {
+					t.Fatalf("list interaction time = %#v", got)
+				}
 			case "show":
 				if envelope.Data == nil || envelope.Data.Source == nil || envelope.Data.Source.Identity.SourceRef != ref {
 					t.Fatalf("show contract is incomplete: %#v", envelope.Data)
+				}
+				if got := envelope.Data.Source.LastInteractionAt; got == nil || *got != interactionTime {
+					t.Fatalf("show interaction time = %#v", got)
 				}
 			case "events":
 				if envelope.Data == nil || envelope.Data.Events == nil || len(*envelope.Data.Events) != 1 || envelope.Page == nil || !envelope.Page.HasMore || envelope.Page.NextCursor == "" {
@@ -421,6 +428,7 @@ func newListStatusAdapter(name, root string, status contract.Status) *listStatus
 	}
 	nativeID := name + "-fictional-source"
 	instance := name + "-default"
+	interactionTime := "2026-09-03T10:00:00Z"
 	result.Sources = []contract.Source{{
 		Identity: contract.SourceIdentity{
 			Provider:                  name,
@@ -429,7 +437,7 @@ func newListStatusAdapter(name, root string, status contract.Status) *listStatus
 			ProviderSourceFingerprint: contract.SourceFingerprint(nativeID),
 			SourceRef:                 contract.NewSourceRef(name, instance, nativeID),
 		},
-		Kind: "session", Relationships: []contract.Relationship{}, Metadata: []contract.Metadata{},
+		Kind: "session", LastInteractionAt: &interactionTime, Relationships: []contract.Relationship{}, Metadata: []contract.Metadata{},
 	}}
 	if status == contract.StatusPartial {
 		result.Omissions = unsupportedOmissions()
@@ -476,18 +484,29 @@ func (a *unsupportedAdapter) Evidence(context.Context, config.Source, string) pr
 func newSyntheticAdapter() *syntheticAdapter {
 	nativeID := "00000000-0000-4000-8000-000000000001"
 	ref := contract.NewSourceRef("synthetic", "synthetic-default", nativeID)
+	interactionTime := "2026-09-03T10:00:00Z"
 	exitCode := 0
 	return &syntheticAdapter{
 		source: contract.Source{
 			Identity: contract.SourceIdentity{Provider: "synthetic", SourceInstance: "synthetic-default", ProviderNativeSourceID: nativeID, ProviderSourceFingerprint: contract.SourceFingerprint(nativeID), SourceRef: ref},
 			Kind:     "session", Relationships: []contract.Relationship{}, Metadata: []contract.Metadata{{Name: "label", Value: "Fictional session"}},
-			VersionHint: &contract.VersionHint{Kind: "synthetic", Value: "hint-1"},
+			LastInteractionAt: &interactionTime,
+			VersionHint:       &contract.VersionHint{Kind: "synthetic", Value: "hint-1"},
 		},
 		events: []contract.Event{
 			{Index: 0, Kind: contract.EventMessage, Message: &contract.MessageEvent{Role: "user", Text: "Hello"}, Metadata: []contract.Metadata{}},
 			{Index: 1, Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "filesystem"}, Metadata: []contract.Metadata{}},
 			{Index: 2, Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true, ExitCode: &exitCode}, Metadata: []contract.Metadata{}},
 		},
+	}
+}
+
+func TestValidateSourcesRejectsNonCanonicalInteractionTime(t *testing.T) {
+	source := newSyntheticAdapter().source
+	bad := "2026-09-03T10:00:00+00:00"
+	source.LastInteractionAt = &bad
+	if err := validateSources([]contract.Source{source}, "synthetic", "synthetic-default"); err == nil {
+		t.Fatal("noncanonical interaction time was accepted")
 	}
 }
 

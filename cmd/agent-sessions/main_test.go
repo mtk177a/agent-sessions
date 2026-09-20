@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/mtk177a/agent-sessions/internal/cli"
 	"github.com/mtk177a/agent-sessions/internal/contract"
@@ -68,8 +70,12 @@ func TestProductionRegistrySupportsBothProvidersEndToEnd(t *testing.T) {
 	if listed.Data == nil || listed.Data.Sources == nil || len(*listed.Data.Sources) != 2 {
 		t.Fatalf("list data = %#v", listed.Data)
 	}
+	listedSources := *listed.Data.Sources
+	if listedSources[0].Identity.SourceRef >= listedSources[1].Identity.SourceRef || listedSources[0].LastInteractionAt == nil || listedSources[1].LastInteractionAt == nil || *listedSources[0].LastInteractionAt != *listedSources[1].LastInteractionAt {
+		t.Fatalf("same-time sources were not listed by source_ref: %#v", listedSources)
+	}
 
-	for _, source := range *listed.Data.Sources {
+	for _, source := range listedSources {
 		t.Run(source.Identity.Provider, func(t *testing.T) {
 			providerName := source.Identity.Provider
 			wantInstance := providerName + "-one"
@@ -78,6 +84,9 @@ func TestProductionRegistrySupportsBothProvidersEndToEnd(t *testing.T) {
 			}
 			if source.VersionHint == nil {
 				t.Fatalf("version hint is missing: %#v", source)
+			}
+			if source.LastInteractionAt == nil || *source.LastInteractionAt != "2026-09-04T10:00:02Z" {
+				t.Fatalf("interaction time = %#v", source.LastInteractionAt)
 			}
 
 			shown := runProductionCLI(t, runner, "show", "--config", configPath, source.Identity.SourceRef)
@@ -125,6 +134,9 @@ func TestProductionRegistrySupportsChatGPTDataExport(t *testing.T) {
 	if source.Identity.Provider != "chatgpt" || source.Identity.SourceInstance != "chatgpt-one" || source.Kind != "conversation" || source.VersionHint == nil || source.VersionHint.Kind != "snapshot_hash" {
 		t.Fatalf("source = %#v", source)
 	}
+	if listed.Status != contract.StatusComplete || source.LastInteractionAt == nil || *source.LastInteractionAt != "2026-09-04T10:00:02Z" {
+		t.Fatalf("ChatGPT interaction time = %#v", listed)
+	}
 	shown := runProductionCLI(t, runner, "show", "--config", configPath, source.Identity.SourceRef)
 	if shown.Data == nil || shown.Data.Source == nil || shown.Data.Source.Identity != source.Identity {
 		t.Fatalf("show data = %#v", shown.Data)
@@ -136,6 +148,89 @@ func TestProductionRegistrySupportsChatGPTDataExport(t *testing.T) {
 	verified := runProductionCLI(t, runner, "verify", "--config", configPath, source.Identity.SourceRef)
 	if verified.Data == nil || verified.Data.VerifiedVersion == nil || verified.Data.VerifiedVersion.Basis != "provider-content-v0" || verified.Data.VerifiedVersion.Value == source.VersionHint.Value {
 		t.Fatalf("verify data = %#v", verified.Data)
+	}
+}
+
+func TestProductionRegistryPaginatesMixedProviderInteractionTimes(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
+	claudeRoot := filepath.Join(root, "claude")
+	codexRoot := filepath.Join(root, "codex")
+	writeClaudeTranscript(t, claudeRoot)
+	writeCodexTranscript(t, codexRoot)
+	exportPath := filepath.Join(root, "chatgpt-export.zip")
+	writeChatGPTExportContent(t, exportPath, `[
+		{"id":"timed","current_node":"user","mapping":{"user":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["hello"]},"create_time":1788516003}}}},
+		{"id":"untimed","current_node":"user","mapping":{"user":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["hello"]}}}}}
+	]`)
+	configPath := filepath.Join(root, "config.json")
+	configured := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"claude-one","provider":"claude","root":%q},{"id":"codex-one","provider":"codex","root":%q},{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, claudeRoot, codexRoot, exportPath)
+	if err := os.WriteFile(configPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := newRunner()
+	all := make([]contract.Source, 0, 4)
+	cursor := ""
+	for {
+		args := []string{"list", "--config", configPath, "--limit", "2"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		page := runProductionCLI(t, runner, args...)
+		if page.Status != contract.StatusPartial || !hasOmissionCode(page.Omissions, "source_time_unavailable") || page.Data == nil || page.Data.Sources == nil || len(*page.Data.Sources) != 2 || page.Page == nil {
+			t.Fatalf("page = %#v", page)
+		}
+		for _, omission := range page.Omissions {
+			if omission.Code == "source_time_unavailable" && omission.Count != 1 {
+				t.Fatalf("time omission count = %#v", page.Omissions)
+			}
+		}
+		all = append(all, *page.Data.Sources...)
+		if !page.Page.HasMore {
+			break
+		}
+		cursor = page.Page.NextCursor
+	}
+	if len(all) != 4 {
+		t.Fatalf("source count = %d", len(all))
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i-1].Identity.SourceRef >= all[i].Identity.SourceRef {
+			t.Fatalf("pagination changed source_ref order: %#v", all)
+		}
+	}
+	cutoff, _ := time.Parse(time.RFC3339, "2026-09-04T10:00:02Z")
+	known := make([]contract.Source, 0, 3)
+	var selected []contract.Source
+	for _, source := range all {
+		if source.LastInteractionAt == nil {
+			continue
+		}
+		known = append(known, source)
+		at, err := time.Parse(time.RFC3339Nano, *source.LastInteractionAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if at.After(cutoff) {
+			selected = append(selected, source)
+		}
+	}
+	if len(known) != 3 || len(selected) != 1 || selected[0].Identity.Provider != "chatgpt" {
+		t.Fatalf("lookback selection = %#v", selected)
+	}
+	sort.Slice(known, func(i, j int) bool {
+		left, _ := time.Parse(time.RFC3339Nano, *known[i].LastInteractionAt)
+		right, _ := time.Parse(time.RFC3339Nano, *known[j].LastInteractionAt)
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return known[i].Identity.SourceRef < known[j].Identity.SourceRef
+	})
+	if known[0].Identity.Provider != "chatgpt" || known[1].Identity.SourceRef >= known[2].Identity.SourceRef {
+		t.Fatalf("time and tie order = %#v", known)
 	}
 }
 
@@ -197,10 +292,10 @@ func writeClaudeTranscript(t *testing.T, root string) {
 	t.Helper()
 	sessionID := "11111111-2222-4333-8444-555555555555"
 	path := filepath.Join(root, "projects", "fictional-project", sessionID+".jsonl")
-	content := fmt.Sprintf(`{"type":"user","sessionId":%q,"uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","version":"2.1.228","message":{"role":"user","content":"hello"}}`, sessionID) + "\n" +
-		fmt.Sprintf(`{"type":"assistant","sessionId":%q,"uuid":"bbbbbbbb-cccc-4ddd-8eee-ffffffffffff","version":"2.1.228","message":{"role":"assistant","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"provider-call","name":"Bash","input":{"command":"must not escape"}}]}}`, sessionID) + "\n" +
-		fmt.Sprintf(`{"type":"user","sessionId":%q,"uuid":"cccccccc-dddd-4eee-8fff-000000000000","version":"2.1.228","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"provider-call","content":"private output","is_error":false}]}}`, sessionID) + "\n" +
-		fmt.Sprintf(`{"type":"assistant","sessionId":%q,"uuid":"dddddddd-eeee-4fff-8000-111111111111","version":"2.1.228","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"fictional provider failure"}],"stop_reason":"error"}}`, sessionID) + "\n"
+	content := fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:00Z","type":"user","sessionId":%q,"uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","version":"2.1.228","message":{"role":"user","content":"hello"}}`, sessionID) + "\n" +
+		fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:01Z","type":"assistant","sessionId":%q,"uuid":"bbbbbbbb-cccc-4ddd-8eee-ffffffffffff","version":"2.1.228","message":{"role":"assistant","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"provider-call","name":"Bash","input":{"command":"must not escape"}}]}}`, sessionID) + "\n" +
+		fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:02Z","type":"user","sessionId":%q,"uuid":"cccccccc-dddd-4eee-8fff-000000000000","version":"2.1.228","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"provider-call","content":"private output","is_error":false}]}}`, sessionID) + "\n" +
+		fmt.Sprintf(`{"timestamp":"2026-09-04T10:00:03Z","type":"assistant","sessionId":%q,"uuid":"dddddddd-eeee-4fff-8000-111111111111","version":"2.1.228","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"fictional provider failure"}],"stop_reason":"error"}}`, sessionID) + "\n"
 	writeFixture(t, path, content)
 }
 
@@ -210,16 +305,16 @@ func writeCodexTranscript(t *testing.T, root string) {
 	path := filepath.Join(root, "sessions", "2026", "09", "04", "rollout-2026-09-04T10-00-00-"+threadID+".jsonl")
 	header := fmt.Sprintf(`{"type":"session_meta","payload":{"session_id":%q,"id":%q,"cli_version":"0.149.1","history_mode":"paginated"}}`, threadID, threadID)
 	content := header + "\n" +
-		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"hello"}]}}}` + "\n" +
-		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"agent-1","content":[{"type":"Text","text":"hi"}]}}}` + "\n" +
-		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"must not escape"}}}` + "\n" +
+		`{"timestamp":"2026-09-04T10:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"hello"}]}}}` + "\n" +
+		`{"timestamp":"2026-09-04T10:00:01Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"agent-1","content":[{"type":"Text","text":"hi"}]}}}` + "\n" +
+		`{"timestamp":"2026-09-04T10:00:02Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"must not escape"}}}` + "\n" +
 		`{"type":"event_msg","payload":{"type":"error","message":"fictional provider failure"}}` + "\n"
 	writeFixture(t, path, content)
 }
 
 func writeChatGPTExport(t *testing.T, filename string) {
 	t.Helper()
-	content := `[{"id":"fictional-conversation","conversation_id":"fictional-conversation","current_node":"assistant","mapping":{"root":{"parent":null,"message":null},"user":{"parent":"root","message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["hello"]}}},"assistant":{"parent":"user","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["hi"]}}}}}]`
+	content := `[{"id":"fictional-conversation","conversation_id":"fictional-conversation","current_node":"assistant","mapping":{"root":{"parent":null,"message":null},"user":{"parent":"root","message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["hello"]},"create_time":1788516000}},"assistant":{"parent":"user","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["hi"]},"create_time":1788516002}}}}]`
 	writeChatGPTExportContent(t, filename, content)
 }
 
@@ -264,7 +359,8 @@ func runProductionCLI(t *testing.T, runner cli.Runner, args ...string) contract.
 	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.SchemaVersion != "v1" || envelope.RedactionPolicyVersion != "v1" || envelope.Status != contract.StatusComplete || envelope.Omissions == nil {
+	wantPartialTime := (envelope.Operation == "list" || envelope.Operation == "show") && hasOmissionCode(envelope.Omissions, "source_time_unavailable")
+	if envelope.SchemaVersion != "v1" || envelope.RedactionPolicyVersion != "v1" || (envelope.Status != contract.StatusComplete && !(wantPartialTime && envelope.Status == contract.StatusPartial)) || envelope.Omissions == nil {
 		t.Fatalf("unstable envelope for %v: %#v", args, envelope)
 	}
 	return envelope

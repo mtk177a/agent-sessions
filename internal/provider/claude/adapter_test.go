@@ -456,7 +456,7 @@ func row(kind, message, extra string) string {
 }
 
 func rowVersion(version, kind, message, extra string) string {
-	return `{"type":"` + kind + `","sessionId":"` + testSessionID + `","uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","version":"` + version + `","message":` + message + extra + `}`
+	return `{"timestamp":"2026-09-03T10:00:00Z","type":"` + kind + `","sessionId":"` + testSessionID + `","uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","version":"` + version + `","message":` + message + extra + `}`
 }
 
 func writeTranscript(t *testing.T, root, project, filenameID string, lines []string) string {

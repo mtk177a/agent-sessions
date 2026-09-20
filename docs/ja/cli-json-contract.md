@@ -64,7 +64,7 @@
 ソースは、オフセットによるページ分割を適用する前に論理ソース参照で並べ替える。
 
 各ソースには `identity`、`kind`、`relationships`、`metadata` が必要である。\
-`version_hint` と `identity.provider_native_source_id` は任意であり、その他の識別フィールドはすべて必須である。
+`version_hint`、`last_interaction_at`、`identity.provider_native_source_id` は任意であり、その他の識別フィールドはすべて必須である。
 
 ### `show <source-ref>`
 
@@ -117,6 +117,17 @@
 存在する場合、`version_hint` には `kind` と `value` が必要で、`kind` も拡張可能である。\
 Codex と Claude Code は安価な変更検出のために `stat_hash` を出力し、ChatGPT Data Export はエクスポート ZIP 全体の SHA-256 識別子として `snapshot_hash` を出力する。\
 利用者は認識済みのヒントを変更検出に使ってよく、認識していないヒント種別は無視しなければならない。
+
+`last_interaction_at` がある場合、その値は末尾が `Z` の正規化された UTC の RFC 3339 時刻である。\
+一つの論理ソースに記録されたユーザーまたはアシスタントのメッセージ、ツール呼び出し、ツール結果のうち、最も遅い時刻を表す。\
+管理用の行、システム通知、ファイルの更新時刻は含めない。\
+やり取りがない場合や、活動行の時刻の欠落・不正値、やり取りの可能性がある未知の行、未検証の版、曖昧な成果物、継承履歴の欠落によって最終時刻を安全に確定できない場合、このフィールドはない。\
+その場合は `scope: source` の `source_time_unavailable` を追加し、`list` または `show` を `partial` にする。\
+`count` で影響するソース数をまとめて示す場合がある。\
+ChatGPT Data Export では選択中の会話経路にあるやり取りを対象とし、別の分岐によってこのフィールドは進まない。
+
+一定期間内の対象を選ぶ利用者は、`list` の全ページを取得し、`last_interaction_at` がないソースを時刻が分かる対象から除外し、絶対日時として比較した後、時刻の降順と `identity.source_ref` の昇順で並べる。\
+ソースの時刻が欠けている場合や未取得のページがある場合など、`partial` の一覧からは対象の全件を確定できない。
 
 ## 論理識別子
 

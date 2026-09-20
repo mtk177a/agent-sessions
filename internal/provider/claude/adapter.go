@@ -58,6 +58,7 @@ type discovery struct {
 }
 
 type transcriptRow struct {
+	Timestamp         string          `json:"timestamp"`
 	Type              string          `json:"type"`
 	SessionID         string          `json:"sessionId"`
 	Version           string          `json:"version"`
@@ -112,6 +113,7 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 		return provider.SourceResult{Err: err}
 	}
 	omissions := append([]contract.Omission{}, discovered.omissions...)
+	missingTimes := 0
 	sources := make([]contract.Source, 0, len(discovered.byFingerprint))
 	fingerprints := make([]string, 0, len(discovered.byFingerprint))
 	for fingerprint := range discovered.byFingerprint {
@@ -127,7 +129,19 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 		if !isSupportedVersion(candidates[0].version) {
 			omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version has not been verified for this adapter."))
 		}
-		sources = append(sources, makeSource(source, candidates))
+		itemSource := makeSource(source, candidates)
+		if len(candidates) == 1 && isSupportedVersion(candidates[0].version) {
+			if value, ok := readLastInteractionAt(source.Root, candidates[0]); ok {
+				itemSource.LastInteractionAt = &value
+			}
+		}
+		if itemSource.LastInteractionAt == nil {
+			missingTimes++
+		}
+		sources = append(sources, itemSource)
+	}
+	if missingTimes > 0 {
+		omissions = append(omissions, contract.Omission{Code: "source_time_unavailable", Scope: "source", Count: missingTimes, Message: "A Claude source interaction time could not be established safely."})
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Identity.SourceRef < sources[j].Identity.SourceRef })
 	status := statusFor(omissions)
@@ -153,7 +167,16 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 	if !isSupportedVersion(candidates[0].version) {
 		omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version has not been verified for this adapter."))
 	}
-	return provider.SourceResult{Status: statusFor(omissions), Sources: []contract.Source{makeSource(source, candidates)}, Omissions: omissions}
+	itemSource := makeSource(source, candidates)
+	if len(candidates) == 1 && isSupportedVersion(candidates[0].version) {
+		if value, ok := readLastInteractionAt(source.Root, candidates[0]); ok {
+			itemSource.LastInteractionAt = &value
+		}
+	}
+	if itemSource.LastInteractionAt == nil {
+		omissions = append(omissions, omission("source_time_unavailable", "source", "A Claude source interaction time could not be established safely."))
+	}
+	return provider.SourceResult{Status: statusFor(omissions), Sources: []contract.Source{itemSource}, Omissions: omissions}
 }
 
 func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint string) provider.EventResult {
@@ -327,7 +350,7 @@ func sortedEntryKeys(entries map[string]safeio.FileEntry) []string {
 
 func isSupportedVersion(version string) bool {
 	switch version {
-	case "2.1.177", "2.1.228":
+	case "2.1.177", "2.1.228", "2.1.260":
 		return true
 	default:
 		return false

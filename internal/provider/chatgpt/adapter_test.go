@@ -34,6 +34,28 @@ const twoConversations = `[
   }
 ]`
 
+func TestInteractionTimeUsesActiveConversationMessages(t *testing.T) {
+	body := `[{"id":"conversation-a","current_node":"assistant-tie","update_time":1900000000,"mapping":{
+		"root":{"parent":null,"message":null},
+		"user":{"parent":"root","message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["hello"]},"create_time":1780000000.1234567}},
+		"assistant-1":{"parent":"user","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["hello back"]},"create_time":1780000010}},
+		"internal":{"parent":"assistant-1","message":{"author":{"role":"assistant"},"content":{"content_type":"reasoning_recap","content":"summary"},"create_time":1780000030}},
+		"assistant-2":{"parent":"internal","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["resumed"]},"create_time":1780000020.000000001}},
+		"assistant-tie":{"parent":"assistant-2","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["same time"]},"create_time":1780000020.000000001}},
+		"other-branch":{"parent":"user","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["other"]},"create_time":1790000000}}
+	}}]`
+	archive := writeZIP(t, []zipMember{{"conversations.json", body}})
+	source := config.Source{ID: "export", Provider: providerName, Root: archive}
+	result := New().List(t.Context(), source)
+	if result.Err != nil || result.Status != contract.StatusComplete || len(result.Sources) != 1 || result.Sources[0].LastInteractionAt == nil || *result.Sources[0].LastInteractionAt != "2026-05-28T20:27:00.000000001Z" {
+		t.Fatalf("list time = %#v", result)
+	}
+	shown := New().Show(t.Context(), source, contract.SourceFingerprint("conversation-a"))
+	if shown.Err != nil || shown.Status != contract.StatusComplete || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != *result.Sources[0].LastInteractionAt {
+		t.Fatalf("show time = %#v", shown)
+	}
+}
+
 func TestDiscoverySeparatesArchiveSnapshotFromConversationIdentity(t *testing.T) {
 	path := writeZIP(t, []zipMember{{"conversations.json", twoConversations}})
 	source := config.Source{ID: "chatgpt-personal", Provider: providerName, Root: path}
@@ -41,7 +63,7 @@ func TestDiscoverySeparatesArchiveSnapshotFromConversationIdentity(t *testing.T)
 	if result.Err != nil {
 		t.Fatal(result.Err)
 	}
-	if result.Status != contract.StatusComplete || len(result.Sources) != 2 {
+	if result.Status != contract.StatusPartial || len(result.Sources) != 2 || result.Omissions[0].Code != "source_time_unavailable" || result.Omissions[0].Count != 2 {
 		t.Fatalf("unexpected discovery: %#v", result)
 	}
 	if result.Sources[0].Identity.ProviderNativeSourceID == result.Sources[1].Identity.ProviderNativeSourceID {
@@ -84,7 +106,7 @@ func TestDiscoverySupportsNumberedConversationMembers(t *testing.T) {
 	second := `[{"id":"second","conversation_id":"second","current_node":"root","mapping":{"root":{"parent":null,"message":null}}}]`
 	path := writeZIP(t, []zipMember{{"nested/conversations-2.json", second}, {"conversations-1.json", first}})
 	result := New().List(t.Context(), config.Source{ID: "export", Provider: providerName, Root: path})
-	if result.Err != nil || result.Status != contract.StatusComplete || len(result.Sources) != 2 {
+	if result.Err != nil || result.Status != contract.StatusPartial || len(result.Sources) != 2 || result.Omissions[0].Code != "source_time_unavailable" {
 		t.Fatalf("numbered discovery = %#v", result)
 	}
 }

@@ -70,7 +70,8 @@ type rawNode struct {
 }
 
 type rawMessage struct {
-	Author struct {
+	CreateTime json.RawMessage `json:"create_time"`
+	Author     struct {
 		Role string `json:"role"`
 	} `json:"author"`
 	Content struct {
@@ -105,17 +106,35 @@ func (a *Adapter) List(ctx context.Context, source config.Source) provider.Sourc
 	}
 	defer scanned.view.file.Close()
 	sources := make([]contract.Source, 0, len(scanned.conversations))
+	unavailable := 0
 	for _, conversation := range scanned.conversations {
+		if err := ctx.Err(); err != nil {
+			return provider.SourceResult{Err: err}
+		}
 		nativeID, ok := conversationIdentity(conversation)
 		if !ok {
 			return unsupportedSources("A conversation identity is missing or inconsistent.")
 		}
-		sources = append(sources, makeSource(source, nativeID, scanned.view.snapshot))
+		item := makeSource(source, nativeID, scanned.view.snapshot)
+		at, ok, err := a.lastInteractionAt(conversation)
+		if err != nil {
+			return provider.SourceResult{Err: err}
+		}
+		if ok {
+			item.LastInteractionAt = &at
+		} else {
+			unavailable++
+		}
+		sources = append(sources, item)
 	}
 	if err := scanned.view.ensureUnchanged(source.Root); err != nil {
 		return provider.SourceResult{Err: err}
 	}
-	return provider.SourceResult{Status: contract.StatusComplete, Sources: sources, Omissions: []contract.Omission{}}
+	omissions := []contract.Omission{}
+	if unavailable > 0 {
+		omissions = append(omissions, contract.Omission{Code: "source_time_unavailable", Scope: "source", Count: unavailable, Message: "The latest interaction time could not be established for one or more conversations."})
+	}
+	return provider.SourceResult{Status: statusFor(omissions), Sources: sources, Omissions: omissions}
 }
 
 func (a *Adapter) Show(ctx context.Context, source config.Source, fingerprint string) provider.SourceResult {
@@ -132,10 +151,21 @@ func (a *Adapter) Show(ctx context.Context, source config.Source, fingerprint st
 		return provider.SourceResult{Err: provider.ErrNotFound}
 	}
 	nativeID, _ := conversationIdentity(conversation)
+	item := makeSource(source, nativeID, scanned.view.snapshot)
+	at, ok, err := a.lastInteractionAt(conversation)
+	if err != nil {
+		return provider.SourceResult{Err: err}
+	}
+	omissions := []contract.Omission{}
+	if ok {
+		item.LastInteractionAt = &at
+	} else {
+		omissions = append(omissions, omission("source_time_unavailable", "source", "The latest interaction time could not be established for this conversation."))
+	}
 	if err := scanned.view.ensureUnchanged(source.Root); err != nil {
 		return provider.SourceResult{Err: err}
 	}
-	return provider.SourceResult{Status: contract.StatusComplete, Sources: []contract.Source{makeSource(source, nativeID, scanned.view.snapshot)}, Omissions: []contract.Omission{}}
+	return provider.SourceResult{Status: statusFor(omissions), Sources: []contract.Source{item}, Omissions: omissions}
 }
 
 func (a *Adapter) Events(ctx context.Context, source config.Source, fingerprint string) provider.EventResult {
@@ -333,38 +363,15 @@ func (a *Adapter) openArchive(filename string) (*archiveView, error) {
 }
 
 func (a *Adapter) normalize(conversation rawConversation) ([]contract.Event, []contract.Omission, bool, error) {
-	if conversation.CurrentNode == "" || conversation.Mapping == nil {
+	reversed, activeCount, supported, err := a.activeNodes(conversation)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !supported {
 		return nil, unsupportedFormat(), false, nil
 	}
-	active := map[string]struct{}{}
-	var reversed []rawNode
-	nodeID := conversation.CurrentNode
-	for nodeID != "" {
-		if len(reversed) >= a.limits.maxEvents {
-			return nil, nil, false, fmt.Errorf("%w: active branch nodes", provider.ErrResourceLimit)
-		}
-		if _, cycle := active[nodeID]; cycle {
-			return nil, unsupportedFormat(), false, nil
-		}
-		raw, ok := conversation.Mapping[nodeID]
-		if !ok {
-			return nil, unsupportedFormat(), false, nil
-		}
-		active[nodeID] = struct{}{}
-		var node rawNode
-		if err := json.Unmarshal(raw, &node); err != nil {
-			return nil, unsupportedFormat(), false, nil
-		}
-		reversed = append(reversed, node)
-		parent, ok := parentID(node.Parent)
-		if !ok {
-			return nil, unsupportedFormat(), false, nil
-		}
-		nodeID = parent
-	}
-	slicesReverse(reversed)
 	omissions := []contract.Omission{}
-	if count := len(conversation.Mapping) - len(active); count > 0 {
+	if count := len(conversation.Mapping) - activeCount; count > 0 {
 		omissions = append(omissions, contract.Omission{Code: "non_active_branch", Scope: "conversation", Count: count, Message: "Nodes outside the selected active branch were omitted."})
 	}
 	events := make([]contract.Event, 0, len(reversed))
@@ -381,11 +388,11 @@ func (a *Adapter) normalize(conversation rawConversation) ([]contract.Event, []c
 			omissions = append(omissions, omission("unknown_node", "event", "An unrecognized active-branch node was omitted."))
 			continue
 		}
-		switch message.Author.Role {
-		case "tool":
+		switch classifyRole(message.Author.Role) {
+		case roleTool:
 			omissions = append(omissions, omission("correlation_omitted", "event", "A tool result without a stable provider-neutral correlation was omitted."))
 			continue
-		case "user", "assistant":
+		case roleMessage:
 		default:
 			omissions = append(omissions, omission("unknown_node", "event", "An unrecognized active-branch node was omitted."))
 			continue
@@ -403,6 +410,40 @@ func (a *Adapter) normalize(conversation rawConversation) ([]contract.Event, []c
 		return nil, omissions, false, nil
 	}
 	return events, omissions, true, nil
+}
+
+func (a *Adapter) activeNodes(conversation rawConversation) ([]rawNode, int, bool, error) {
+	if conversation.CurrentNode == "" || conversation.Mapping == nil {
+		return nil, 0, false, nil
+	}
+	active := map[string]struct{}{}
+	var reversed []rawNode
+	nodeID := conversation.CurrentNode
+	for nodeID != "" {
+		if len(reversed) >= a.limits.maxEvents {
+			return nil, 0, false, fmt.Errorf("%w: active branch nodes", provider.ErrResourceLimit)
+		}
+		if _, cycle := active[nodeID]; cycle {
+			return nil, 0, false, nil
+		}
+		raw, ok := conversation.Mapping[nodeID]
+		if !ok {
+			return nil, 0, false, nil
+		}
+		active[nodeID] = struct{}{}
+		var node rawNode
+		if err := json.Unmarshal(raw, &node); err != nil {
+			return nil, 0, false, nil
+		}
+		reversed = append(reversed, node)
+		parent, ok := parentID(node.Parent)
+		if !ok {
+			return nil, 0, false, nil
+		}
+		nodeID = parent
+	}
+	slicesReverse(reversed)
+	return reversed, len(active), true, nil
 }
 
 func (s scannedArchive) find(fingerprint string) (rawConversation, bool) {
@@ -452,7 +493,7 @@ func conversationIdentity(conversation rawConversation) (string, bool) {
 }
 
 func messageText(message rawMessage) (string, bool) {
-	if message.Content.ContentType != "text" && message.Content.ContentType != "multimodal_text" {
+	if !isTextContent(message.Content.ContentType) {
 		return "", false
 	}
 	parts := make([]string, 0, len(message.Content.Parts))

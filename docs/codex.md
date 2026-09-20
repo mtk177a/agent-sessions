@@ -16,7 +16,7 @@ Source resolution follows the common precedence of explicit root, configured sou
 The adapter walks both transcript locations deterministically.\
 It accepts only bounded regular files contained by the provider root, rejects symlinks and special files, and rechecks file and root identity when opening content.
 
-Discovery reads the first bounded JSONL record only.\
+Identity discovery reads the first bounded JSONL record; `list` and `show` also read the bounded current rollout to establish interaction time.\
 The `session_meta.payload.id` field is the provider-native thread identity, so moving an artifact between active and archived locations does not change its `source_ref`.
 
 When more than one artifact represents the same thread, the adapter follows Codex's current rollout selection ordering by timestamp and rollout ID.\
@@ -27,8 +27,9 @@ Verification hashes bounded provider content through the common `VerifiedVersion
 
 ## Version-sensitive decoding
 
-The decoder is intentionally scoped to rollout JSONL written by Codex CLI `0.149.1`.\
-Compatibility was checked against the official `openai/codex` tag [`rust-v0.149.1`](https://github.com/openai/codex/tree/rust-v0.149.1) at commit [`ff29a44391deccde0aba0f8390337d7f3c319ea4`](https://github.com/openai/codex/commit/ff29a44391deccde0aba0f8390337d7f3c319ea4), including the protocol, history, thread-store, and state extraction implementations.
+The decoder accepts verified rollout JSONL structures from Codex CLI `0.149.1` and `0.153.0`.\
+The older boundary was checked against the official `openai/codex` tag [`rust-v0.149.1`](https://github.com/openai/codex/tree/rust-v0.149.1) at commit [`ff29a44391deccde0aba0f8390337d7f3c319ea4`](https://github.com/openai/codex/commit/ff29a44391deccde0aba0f8390337d7f3c319ea4).\
+The `0.153.0` boundary was checked against the official [`rust-v0.153.0` history implementation](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs); its `token_usage_record` is bookkeeping, while an encountered `realtime_item` remains incomplete because its interaction meaning is not normalized.
 
 The adapter recognizes the `session_meta`, `event_msg`, and `response_item` rollout envelopes needed for the public observations.\
 For legacy history, `user_message` and `agent_message` events are the canonical message rows, while response tool calls and their persisted output rows provide correlation evidence.\
@@ -40,6 +41,10 @@ Public categories are limited to `shell`, `file_change`, `mcp`, and `tool`; raw 
 
 Errors are normalized from explicit provider error events.\
 Parent and fork relationships are emitted only from explicit `parent_thread_id` and `forked_from_id` metadata.
+
+The latest timestamp of canonical message and tool rows becomes `last_interaction_at`.\
+Later token accounting, lifecycle events, and provider errors do not advance it.\
+Missing or invalid timestamps, uncertain rows, and `history_base` prevent a source time rather than triggering a file-time fallback.
 
 ## Completeness and limitations
 

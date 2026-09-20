@@ -120,6 +120,11 @@ func boundSource(source *Source) (bool, error) {
 		identity.ProviderNativeSourceID = ""
 		changed = true
 	}
+	if source.LastInteractionAt != nil {
+		if err := requireBoundedString(*source.LastInteractionAt); err != nil {
+			return false, err
+		}
+	}
 	if source.VersionHint != nil {
 		if err := requireBoundedString(source.VersionHint.Kind); err != nil {
 			return false, err

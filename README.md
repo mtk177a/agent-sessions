@@ -4,6 +4,9 @@
 
 It discovers provider-owned interaction records, exposes them through a normalized machine-readable interface, and leaves interpretation and durable processing state to downstream consumers.
 
+`list` and `show` expose `last_interaction_at` when a supported transcript establishes the latest recorded message or tool interaction time.\
+A missing time is reported as an omission; consumers can select a fixed lookback cohort from all `list` pages and sort eligible sources by time descending, then `source_ref` ascending.
+
 > Status: the provider-neutral CLI core and read-only Codex, Claude Code, and ChatGPT Data Export adapters implement the stable `v1` JSON contract.
 
 ## Build

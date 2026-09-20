@@ -163,7 +163,7 @@ func TestCorrelationFailuresArePartialAndNotGuessed(t *testing.T) {
 func TestRelationshipsRequireExplicitProviderFields(t *testing.T) {
 	home := t.TempDir()
 	extra := `,"parent_thread_id":"` + secondThreadID + `","forked_from_id":"018f47e2-7b0a-7d31-8a13-7dc76c914abe"`
-	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", extra)})
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", extra), `{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}`})
 	listed := New().List(context.Background(), testSource(home))
 	if listed.Status != contract.StatusComplete || len(listed.Sources) != 1 || len(listed.Sources[0].Relationships) != 2 {
 		t.Fatalf("List() = %#v", listed)
@@ -224,7 +224,7 @@ func TestUnsupportedVersionAndMalformedHeaderDegradeDiscovery(t *testing.T) {
 	malformed := rolloutPath(home, "archived_sessions", secondThreadID)
 	writeRollout(t, malformed, []string{`{"type":"future_header","payload":{}}`})
 	listed := New().List(context.Background(), testSource(home))
-	if listed.Status != contract.StatusPartial || len(listed.Sources) != 1 || len(listed.Omissions) != 2 {
+	if listed.Status != contract.StatusPartial || len(listed.Sources) != 1 || len(listed.Omissions) != 3 || !hasOmission(listed.Omissions, "source_time_unavailable") {
 		t.Fatalf("List() = %#v", listed)
 	}
 }
@@ -301,7 +301,7 @@ func TestCLIIntegrationPreservesProviderContentAndSemanticMetadata(t *testing.T)
 	home := t.TempDir()
 	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
 		header(testThreadID, "0.149.1", "legacy", ""),
-		`{"type":"event_msg","payload":{"type":"user_message","message":"hello"}}`,
+		`{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}`,
 	})
 	before := snapshotTree(t, home)
 	runner := cli.Runner{Version: "test", Registry: provider.NewRegistry(New())}
@@ -325,8 +325,8 @@ func TestCLIIntegrationPreservesProviderContentAndSemanticMetadata(t *testing.T)
 
 func TestCLIUsesMultipleConfiguredCodexHomes(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
-	writeRollout(t, rolloutPath(first, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", "")})
-	writeRollout(t, rolloutPath(second, "sessions", secondThreadID), []string{header(secondThreadID, "0.149.1", "legacy", "")})
+	writeRollout(t, rolloutPath(first, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", ""), `{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}`})
+	writeRollout(t, rolloutPath(second, "sessions", secondThreadID), []string{header(secondThreadID, "0.149.1", "legacy", ""), `{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}`})
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	configJSON := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"codex-one","provider":"codex","root":%q},{"id":"codex-two","provider":"codex","root":%q}]}`, first, second)
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
@@ -366,7 +366,7 @@ func TestCLIResolvesEnvironmentAndStandardCodexHomes(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			home := test.prepare(t, t.TempDir())
-			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", "")})
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "0.149.1", "legacy", ""), `{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}`})
 			result := runCLI(t, cli.Runner{Version: "test", Registry: provider.NewRegistry(New())}, test.listArgs...)
 			if result.Status != contract.StatusComplete || result.Data == nil || result.Data.Sources == nil || len(*result.Data.Sources) != 1 {
 				t.Fatalf("list = %#v", result)

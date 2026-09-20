@@ -60,7 +60,7 @@ The configuration schema is separately validated and currently accepts exactly `
 Sources are sorted by logical source reference before offset pagination is applied.
 
 Each source requires `identity`, `kind`, `relationships`, and `metadata`.\
-`version_hint` and `identity.provider_native_source_id` are optional; all other identity fields are required.
+`version_hint`, `last_interaction_at`, and `identity.provider_native_source_id` are optional; all other identity fields are required.
 
 ### `show <source-ref>`
 
@@ -111,6 +111,15 @@ Consumers must not reject an otherwise valid `v1` response solely because a sour
 When present, `version_hint` requires `kind` and `value`, and its `kind` is also extensible.\
 Codex and Claude Code emit `stat_hash` for inexpensive change detection, while ChatGPT Data Export emits `snapshot_hash` for the SHA-256 identity of the complete export ZIP.\
 Consumers may use a recognized hint for change detection and must ignore an unrecognized hint kind.
+
+`last_interaction_at`, when present, is a canonical UTC RFC 3339 timestamp ending in `Z`.\
+It is the latest recorded user or assistant message, tool call, or tool result time in the logical source; management rows, system notifications, and file modification times are excluded.\
+It is absent if no interaction exists or the maximum cannot be established safely, including missing or malformed activity timestamps, unknown potentially interactive rows, unverified versions, ambiguous artifacts, and omitted inherited history.\
+Such absence adds `source_time_unavailable` with `scope: source` and makes `list` or `show` partial; `count` may aggregate affected sources.\
+For ChatGPT Data Export, the selected active branch defines the interactions considered; other branches do not advance this field.
+
+For a fixed lookback cohort, a consumer collects every `list` page, excludes sources without `last_interaction_at` from the known-time subset, compares timestamps as absolute instants, then sorts eligible sources by `last_interaction_at` descending and `identity.source_ref` ascending.\
+A partial listing, including a missing source time or an unfinished page, cannot establish that the cohort is exhaustive.
 
 ## Logical identity
 

@@ -504,6 +504,11 @@ func validateSources(sources []contract.Source, providerName, instance string) e
 		if !contract.ValidToken(source.Kind) {
 			return errors.New("invalid source kind")
 		}
+		if source.LastInteractionAt != nil {
+			if err := contract.ValidateInteractionTime(*source.LastInteractionAt); err != nil {
+				return err
+			}
+		}
 		if source.VersionHint != nil && !contract.ValidToken(source.VersionHint.Kind) {
 			return errors.New("invalid version hint kind")
 		}

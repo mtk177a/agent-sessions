@@ -41,11 +41,12 @@ type Data struct {
 }
 
 type Source struct {
-	Identity      SourceIdentity `json:"identity"`
-	Kind          string         `json:"kind"`
-	VersionHint   *VersionHint   `json:"version_hint,omitempty"`
-	Relationships []Relationship `json:"relationships"`
-	Metadata      []Metadata     `json:"metadata"`
+	Identity          SourceIdentity `json:"identity"`
+	Kind              string         `json:"kind"`
+	LastInteractionAt *string        `json:"last_interaction_at,omitempty"`
+	VersionHint       *VersionHint   `json:"version_hint,omitempty"`
+	Relationships     []Relationship `json:"relationships"`
+	Metadata          []Metadata     `json:"metadata"`
 }
 
 type SourceIdentity struct {
@@ -157,6 +158,38 @@ func NewEnvelope(operation, cliVersion string, status Status) Envelope {
 func (e Envelope) Validate() error {
 	if e.SchemaVersion != SchemaVersion || e.RedactionPolicyVersion != RedactionPolicyVersion {
 		return errors.New("invalid contract version")
+	}
+	if e.Data != nil {
+		checkSource := func(source Source) error {
+			if source.LastInteractionAt != nil {
+				return ValidateInteractionTime(*source.LastInteractionAt)
+			}
+			return nil
+		}
+		missingTime := false
+		if e.Data.Source != nil {
+			if err := checkSource(*e.Data.Source); err != nil {
+				return err
+			}
+			missingTime = e.Data.Source.LastInteractionAt == nil
+		}
+		if e.Data.Sources != nil {
+			for _, source := range *e.Data.Sources {
+				if err := checkSource(source); err != nil {
+					return err
+				}
+				missingTime = missingTime || source.LastInteractionAt == nil
+			}
+		}
+		if (e.Operation == "list" || e.Operation == "show") && missingTime {
+			found := false
+			for _, omission := range e.Omissions {
+				found = found || omission.Code == "source_time_unavailable" && omission.Scope == "source"
+			}
+			if e.Status != StatusPartial || !found {
+				return errors.New("missing source interaction time requires a partial result and omission")
+			}
+		}
 	}
 	for _, omission := range e.Omissions {
 		if !ValidToken(omission.Code) || !ValidToken(omission.Scope) {

@@ -27,18 +27,25 @@ Verification hashes the bounded main transcript through the common `VerifiedVers
 
 ## Version-sensitive decoding
 
-The decoder is intentionally scoped to internal transcript JSONL verified for Claude Code `2.1.177` and `2.1.228`.\
+The decoder is scoped to verified internal transcript JSONL structures for Claude Code `2.1.177`, `2.1.228`, and `2.1.260`.\
 Claude Code documents the transcript location but states that each line's internal shape can change between releases, so a different row version prevents `complete` rather than being accepted speculatively.
 
 Compatibility for `2.1.228` was checked against its official Claude Code distribution and the documented transcript, hook, status-line, and subagent location contracts.\
 Compatibility for `2.1.177` was checked read-only against private provider-owned records and is covered by independently constructed synthetic fixtures.\
 Only structural properties were inspected, and no private contents or identifiers were copied into this repository.
 
+The `2.1.260` row-writing structures were inspected in the signed official distribution without running it or using real transcripts as fixtures.\
+This does not verify every possible row shape; unknown rows and blocks still prevent `complete`.
+
 The adapter accepts `user`, `assistant`, `system`, and `attachment` rows at the verified version.\
 It normalizes public user and assistant text, `tool_use` calls, explicitly correlated `tool_result` blocks, and explicit provider API errors.
 
 Known bookkeeping rows are not public observations and are ignored.\
 Unknown rows, unknown content blocks, attachments, reasoning blocks, internal user metadata, and unsupported system observations are reported as omissions.
+
+The latest timestamp of supported user and assistant message or tool rows becomes `last_interaction_at`.\
+Bookkeeping, supported non-interaction system rows, and provider API errors do not advance it.\
+Missing or invalid timestamps, unknown potentially interactive rows or blocks, and ambiguous transcripts prevent a source time.
 
 Tool call identifiers are deterministic adapter-owned hashes of the session identity and provider correlation identifier.\
 Results are related to calls only through the explicit `tool_use_id` value.

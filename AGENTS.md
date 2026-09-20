@@ -106,7 +106,9 @@ Consumers own the meaning applied to those observations.
 
 ## Language
 
-Public repository artifacts are written in English.
+English is the canonical language for public repository artifacts and repository rules.\
+Maintain the Japanese reference translations listed in [Localization](docs/localization.md) for comprehension and review; they do not define independent requirements or authority.\
+If the versions differ, the English version prevails.
 
 This includes:
 
@@ -115,19 +117,22 @@ This includes:
 - README and documentation;
 - ADRs;
 - CLI help and diagnostics;
-- commit messages;
+- commit-message summaries;
 - release notes;
 - repository policy files.
 
-Do not maintain synchronized full Japanese translations of public artifacts.
+When adding or changing a maintained English canonical file, use the repository-local `maintain-japanese-references` Skill to review its Japanese counterpart.\
+Create or update the reference in the same change when the English meaning changes.\
+When it does not, leave the reference unchanged and record the reason in the pull request's Validation or Risks / Follow-up section.\
+Do not add translations for ADRs under `docs/decisions/` as part of the maintained reference set.
 
 Maintainer workflow may use Japanese when it reduces review or decision-making cost.
 
 For maintainer-created public Issues and pull requests:
 
 - use an English title;
-- include a short English summary sufficient to identify the public change;
-- detailed reasoning and review notes may be written in Japanese or English;
+- include a short English `Summary` sufficient to identify the public change;
+- use Japanese by default for the remaining body and comments, while allowing English when appropriate;
 - do not duplicate the complete body as an English/Japanese translation pair.
 
 External contributors are not required to follow the maintainer's Japanese workflow.

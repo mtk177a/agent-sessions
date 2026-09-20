@@ -3,7 +3,7 @@
 ## Compatibility status
 
 The public response schema is stable `v1`.\
-The same contract is implemented by the production Codex and Claude Code adapters.
+The same contract is implemented by the production Codex, Claude Code, and ChatGPT Data Export adapters.
 
 The following is the smallest complete `list` response:
 

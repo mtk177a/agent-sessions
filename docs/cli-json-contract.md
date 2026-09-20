@@ -154,14 +154,18 @@ Each event requires `index`, `kind`, exactly one typed event payload, and bounde
 Supported kinds are:
 
 - `message`, with `role` and redacted `text`;
-- `tool_call`, with a normalized `call_id`, safe operation `category`, optional `action`, and `evidence_state`;
-- `tool_result`, with the related `call_id`, `success`, optional `exit_code` and `excerpt`, `evidence_state`, and optional `redacted` and `truncated` flags;
+- `tool_call`, with a normalized `call_id`, safe operation `category`, and optional `action` and `evidence_state`;
+- `tool_result`, with the related `call_id`, `success`, and optional `exit_code`, `excerpt`, `evidence_state`, `redacted`, and `truncated` fields;
 - `error`, with a safe `category` and redacted `message`.
 
 A tool result must reference one earlier unique tool call, and at most one normalized result may reference a call.\
 Provider adapters report duplicate, missing, or unmatched correlation as an omission instead of emitting an ambiguous event sequence.
 
 Raw commands and raw tool arguments are not part of the public event model.
+
+`evidence_state` is optional for compatibility with earlier `v1` responses.\
+When it is omitted, the evidence state was not reported; consumers must not interpret its omission as `absent`.\
+An event without `evidence_state` also has no `action`, `excerpt`, `redacted`, or `truncated` field.
 
 Tool call `action` is one of `execute`, `read`, `search`, `write`, `edit`, or `invoke`; `invoke` means only that a tool was called.\
 The action is present only when `evidence_state` is `available`.\

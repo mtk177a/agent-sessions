@@ -107,6 +107,38 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 	}
 }
 
+func TestEventsAcceptLegacyV1ToolEvidence(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config.json")
+	configJSON := `{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := newSyntheticAdapter()
+	adapter.events[1].ToolCall.Action = ""
+	adapter.events[1].ToolCall.EvidenceState = ""
+	adapter.events[2].ToolResult.EvidenceState = ""
+	runner := Runner{Version: "test", Registry: provider.NewRegistry(adapter)}
+	var output bytes.Buffer
+	if exit := runner.Run(context.Background(), []string{"events", "--config", configPath, adapter.source.Identity.SourceRef}, &output); exit != ExitOK {
+		t.Fatalf("legacy v1 events exit=%d output=%s", exit, output.String())
+	}
+	var envelope contract.Envelope
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.SchemaVersion != "v1" || envelope.Status != contract.StatusComplete || len(envelope.Omissions) != 0 {
+		t.Fatalf("legacy v1 events changed the envelope: %#v", envelope)
+	}
+	events := *envelope.Data.Events
+	if events[1].ToolCall.EvidenceState != "" || events[2].ToolResult.EvidenceState != "" {
+		t.Fatalf("missing evidence states were inferred: %#v", events)
+	}
+	if strings.Contains(output.String(), `"evidence_state"`) {
+		t.Fatalf("missing evidence states were serialized: %s", output.String())
+	}
+}
+
 func TestStructuredErrorsAndExitCodes(t *testing.T) {
 	runner := Runner{Version: "test", Registry: provider.NewRegistry()}
 	cases := []struct {
@@ -606,5 +638,29 @@ func TestNormalizeAndValidateEventsRejectsUnsafeExcerpt(t *testing.T) {
 	}
 	if err := validateToolEvidenceOmissions(events, nil); err == nil {
 		t.Fatal("redacted evidence without an omission was accepted")
+	}
+}
+
+func TestNormalizeAndValidateEventsRejectsEvidenceWithoutState(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func([]contract.Event)
+	}{
+		{"action", func(events []contract.Event) { events[0].ToolCall.Action = "read" }},
+		{"excerpt", func(events []contract.Event) { events[1].ToolResult.Excerpt = "PASS" }},
+		{"redacted", func(events []contract.Event) { events[1].ToolResult.Redacted = true }},
+		{"truncated", func(events []contract.Event) { events[1].ToolResult.Truncated = true }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []contract.Event{
+				{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool"}, Metadata: []contract.Metadata{}},
+				{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true}, Metadata: []contract.Metadata{}},
+			}
+			tc.change(events)
+			if err := normalizeAndValidateEvents(events); err == nil {
+				t.Fatal("evidence without its state was accepted")
+			}
+		})
 	}
 }

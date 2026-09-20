@@ -106,7 +106,7 @@ type ToolCallEvent struct {
 	CallID        string        `json:"call_id"`
 	Category      string        `json:"category"`
 	Action        string        `json:"action,omitempty"`
-	EvidenceState EvidenceState `json:"evidence_state"`
+	EvidenceState EvidenceState `json:"evidence_state,omitempty"`
 }
 
 type ToolResultEvent struct {
@@ -114,7 +114,7 @@ type ToolResultEvent struct {
 	Success       bool          `json:"success"`
 	ExitCode      *int          `json:"exit_code,omitempty"`
 	Excerpt       string        `json:"excerpt,omitempty"`
-	EvidenceState EvidenceState `json:"evidence_state"`
+	EvidenceState EvidenceState `json:"evidence_state,omitempty"`
 	Redacted      bool          `json:"redacted,omitempty"`
 	Truncated     bool          `json:"truncated,omitempty"`
 }

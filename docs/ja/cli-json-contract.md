@@ -164,9 +164,9 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 - `message`。\
   `role` と秘匿化された `text` を持つ。
 - `tool_call`。\
-  正規化された `call_id`、安全な操作 `category`、任意の `action`、`evidence_state` を持つ。
+  正規化された `call_id`、安全な操作 `category`、任意の `action` と `evidence_state` を持つ。
 - `tool_result`。\
-  関連する `call_id`、`success`、任意の `exit_code` と `excerpt`、`evidence_state`、任意の `redacted` と `truncated` を持つ。
+  関連する `call_id` と `success`、任意の `exit_code`、`excerpt`、`evidence_state`、`redacted`、`truncated` を持つ。
 - `error`。\
   安全な `category` と秘匿化された `message` を持つ。
 
@@ -174,6 +174,10 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 プロバイダーアダプターは、重複、欠落、対応しない相関を、曖昧なイベント列として出力せず、省略として報告する。
 
 生のコマンドと生のツール引数は、公開イベントモデルに含めない。
+
+`evidence_state` は、以前の `v1` レスポンスとの互換性のために任意である。\
+省略された場合は証拠の状態が報告されていないことを意味し、利用者は `absent` と解釈してはならない。\
+`evidence_state` がないイベントには、`action`、`excerpt`、`redacted`、`truncated` も存在しない。
 
 ツール呼び出しの `action` は `execute`、`read`、`search`、`write`、`edit`、`invoke` のいずれかである。\
 `invoke` はツールが呼び出されたことだけを表す。\

@@ -571,7 +571,7 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 				return errors.New("invalid message event")
 			}
 		case contract.EventToolCall:
-			if event.ToolCall == nil || !contract.ValidIdentifier(event.ToolCall.CallID) || !contract.ValidToken(event.ToolCall.Category) || !contract.ValidEvidenceState(event.ToolCall.EvidenceState) || (event.ToolCall.EvidenceState == contract.EvidenceAvailable) != (event.ToolCall.Action != "") || event.ToolCall.Action != "" && !contract.ValidToolAction(event.ToolCall.Action) {
+			if event.ToolCall == nil || !contract.ValidIdentifier(event.ToolCall.CallID) || !contract.ValidToken(event.ToolCall.Category) || event.ToolCall.EvidenceState != "" && !contract.ValidEvidenceState(event.ToolCall.EvidenceState) || (event.ToolCall.EvidenceState == contract.EvidenceAvailable) != (event.ToolCall.Action != "") || event.ToolCall.Action != "" && !contract.ValidToolAction(event.ToolCall.Action) {
 				return errors.New("invalid tool call event")
 			}
 			if _, exists := calls[event.ToolCall.CallID]; exists {
@@ -579,7 +579,7 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 			}
 			calls[event.ToolCall.CallID] = struct{}{}
 		case contract.EventToolResult:
-			if event.ToolResult == nil || !contract.ValidEvidenceState(event.ToolResult.EvidenceState) || (event.ToolResult.EvidenceState == contract.EvidenceAvailable) != (event.ToolResult.Excerpt != "") || event.ToolResult.EvidenceState == contract.EvidenceAbsent && (event.ToolResult.Redacted || event.ToolResult.Truncated) || event.ToolResult.Truncated && event.ToolResult.EvidenceState != contract.EvidenceAvailable || event.ToolResult.Excerpt != "" && !contract.ValidSafeToolExcerpt(event.ToolResult.Excerpt) {
+			if event.ToolResult == nil || event.ToolResult.EvidenceState != "" && !contract.ValidEvidenceState(event.ToolResult.EvidenceState) || (event.ToolResult.EvidenceState == contract.EvidenceAvailable) != (event.ToolResult.Excerpt != "") || (event.ToolResult.EvidenceState == "" || event.ToolResult.EvidenceState == contract.EvidenceAbsent) && (event.ToolResult.Redacted || event.ToolResult.Truncated) || event.ToolResult.Truncated && event.ToolResult.EvidenceState != contract.EvidenceAvailable || event.ToolResult.Excerpt != "" && !contract.ValidSafeToolExcerpt(event.ToolResult.Excerpt) {
 				return errors.New("invalid tool result event")
 			}
 			if _, exists := calls[event.ToolResult.CallID]; !exists {

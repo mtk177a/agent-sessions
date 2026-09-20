@@ -262,6 +262,8 @@ These capabilities belong to downstream consumers or separate systems.
 
 ## Documentation
 
+- [Japanese reference translations and language policy](docs/localization.md)
+- [Japanese reference of this README](README.ja.md)
 - [Architecture](docs/architecture.md)
 - [Codex provider](docs/codex.md)
 - [Claude Code provider](docs/claude.md)

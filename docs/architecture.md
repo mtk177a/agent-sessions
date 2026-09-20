@@ -6,14 +6,14 @@
 
 Its responsibilities are limited to:
 
-* source discovery;
-* provider access;
-* identity;
-* source-version observation;
-* normalization;
-* bounded output;
-* completeness reporting;
-* verification.
+- source discovery;
+- provider access;
+- identity;
+- source-version observation;
+- normalization;
+- bounded output;
+- completeness reporting;
+- verification.
 
 It does not own the interpretation that downstream consumers assign to those records.
 
@@ -71,10 +71,10 @@ other local tooling
 
 An operation whose purpose is inspection must not modify:
 
-* provider-owned interaction records;
-* provider-owned application metadata;
-* consumer state;
-* persistent `agent-sessions` application state.
+- provider-owned interaction records;
+- provider-owned application metadata;
+- consumer state;
+- persistent `agent-sessions` application state.
 
 The adapter does not write those values.\
 The host file system may update access-time metadata when a provider file is read; that file-system side effect is outside the semantic no-write guarantee.
@@ -108,11 +108,11 @@ The access layer must not infer or reconcile those states.
 
 The architecture does not require any of the following:
 
-* daemon;
-* file watcher;
-* timer;
-* periodic synchronization job;
-* lifecycle-hook ingestion process.
+- daemon;
+- file watcher;
+- timer;
+- periodic synchronization job;
+- lifecycle-hook ingestion process.
 
 When no command is running, `agent-sessions` performs no work.
 
@@ -150,10 +150,10 @@ A source instance has a stable logical ID and belongs to one provider.
 
 Depending on the provider, it may also have:
 
-* a provider home;
-* an archive path;
-* an access method;
-* other machine-local locator information.
+- a provider home;
+- an archive path;
+- an access method;
+- other machine-local locator information.
 
 Locators do not define logical identity.
 
@@ -204,12 +204,12 @@ An ordered normalized observation within an interaction.
 
 The common event model represents:
 
-* user messages;
-* assistant messages;
-* tool calls;
-* tool results;
-* errors;
-* source relationships and lifecycle metadata when materially available.
+- user messages;
+- assistant messages;
+- tool calls;
+- tool results;
+- errors;
+- source relationships and lifecycle metadata when materially available.
 
 Provider-specific information that cannot be represented safely or faithfully may remain provider metadata or be reported as omitted.\
 Normalization must not invent equivalence between provider concepts that are materially different.
@@ -225,10 +225,10 @@ Source listings use inexpensive metadata to indicate whether a source may have c
 
 Depending on the provider, useful hints may include:
 
-* provider-reported update time;
-* artifact modification time;
-* artifact size;
-* another stable provider metadata value.
+- provider-reported update time;
+- artifact modification time;
+- artifact size;
+- another stable provider metadata value.
 
 A version hint is an optimization signal.\
 It is not durable cryptographic evidence.
@@ -286,10 +286,10 @@ All production adapters implement [ADR 0003](decisions/0003-separate-provider-di
 
 A documented provider interface is preferred when it provides:
 
-* sufficient source discovery;
-* sufficient source fidelity;
-* bounded access;
-* a non-mutating read path.
+- sufficient source discovery;
+- sufficient source fidelity;
+- bounded access;
+- a non-mutating read path.
 
 Official status alone is not sufficient.
 
@@ -353,9 +353,9 @@ Ordinary single-source environments work without a dedicated configuration file.
 
 Explicit configuration exists for:
 
-* multiple stores for one provider;
-* nonstandard provider homes;
-* mounted provider data.
+- multiple stores for one provider;
+- nonstandard provider homes;
+- mounted provider data.
 
 Resolution follows:
 
@@ -414,12 +414,12 @@ The locators are fictional examples.
 
 The implementation does not require:
 
-* SQLite;
-* another persistent database;
-* a session registry;
-* a transcript mirror;
-* a persistent search index;
-* a background event spool.
+- SQLite;
+- another persistent database;
+- a session registry;
+- a transcript mirror;
+- a persistent search index;
+- a background event spool.
 
 This is an architectural choice rather than an implementation shortcut.
 
@@ -429,12 +429,12 @@ A cache may be introduced only when realistic measurements show that direct disc
 
 Any future cache must satisfy all of the following:
 
-* it is not authoritative;
-* it may be deleted without loss of correctness;
-* cache absence changes performance only;
-* unchanged read operations do not cause unnecessary persistent writes;
-* write amplification is measured;
-* idle disk writes remain zero.
+- it is not authoritative;
+- it may be deleted without loss of correctness;
+- cache absence changes performance only;
+- unchanged read operations do not cause unnecessary persistent writes;
+- write amplification is measured;
+- idle disk writes remain zero.
 
 Caching remains an implementation detail and is not part of the consumer-facing state model.
 
@@ -487,22 +487,22 @@ Historical interaction records are untrusted data.
 
 They may contain:
 
-* shell commands;
-* tool instructions;
-* prompts;
-* URLs;
-* credentials;
-* generated source code;
-* content claiming to override current instructions.
+- shell commands;
+- tool instructions;
+- prompts;
+- URLs;
+- credentials;
+- generated source code;
+- content claiming to override current instructions.
 
 The security boundary requires the following:
 
-* No historical instruction gains authority by appearing in a source record.
-* The access layer must not execute historical content or follow historical instructions.
-* Output does not expose secrets that are not required for the requested operation.
-* Provider adapters require resource limits for malformed, nested, compressed, oversized, or otherwise adversarial input.
-* Committed tests and fixtures must be synthetic.
-* Real private session data must not be converted into committed fixtures, even after manual redaction.
+- No historical instruction gains authority by appearing in a source record.
+- The access layer must not execute historical content or follow historical instructions.
+- Output does not expose secrets that are not required for the requested operation.
+- Provider adapters require resource limits for malformed, nested, compressed, oversized, or otherwise adversarial input.
+- Committed tests and fixtures must be synthetic.
+- Real private session data must not be converted into committed fixtures, even after manual redaction.
 
 ## Implemented CLI core
 
@@ -516,10 +516,10 @@ Discover logical sources and return bounded metadata.
 
 Implemented selection and pagination flags include:
 
-* provider;
-* source instance;
-* page limit and cursor;
-* explicit provider-level root.
+- provider;
+- source instance;
+- page limit and cursor;
+- explicit provider-level root.
 
 ### `show`
 
@@ -537,7 +537,7 @@ No command implies that a downstream consumer has reviewed or accepted a source.
 
 The stable fields, exit codes, pagination behavior, bounds, compatibility rule, and final-redaction policy are documented in [CLI JSON contract](cli-json-contract.md).
 
-The current executable contains the provider-neutral core and the production Codex and Claude Code adapters.
+The current executable contains the provider-neutral core and the production Codex, Claude Code, and ChatGPT Data Export adapters.
 
 ## Consumer responsibilities
 
@@ -545,12 +545,12 @@ Consumers own all domain-specific processing state.
 
 Examples include:
 
-* reviewed source versions;
-* retrospective findings;
-* evidence references;
-* proposals;
-* import decisions;
-* domain-specific derived records.
+- reviewed source versions;
+- retrospective findings;
+- evidence references;
+- proposals;
+- import decisions;
+- domain-specific derived records.
 
 `agent-sessions` exposes evidence.\
 It does not assign meaning to that evidence.
@@ -559,15 +559,15 @@ It does not assign meaning to that evidence.
 
 The architecture does not currently provide:
 
-* a universal agent-memory system;
-* harness retrospective or improvement;
-* personal-memory semantics;
-* a canonical transcript archive;
-* automatic cross-machine synchronization;
-* background telemetry;
-* a web UI;
-* vector search;
-* cloud storage;
-* provider mutation operations.
+- a universal agent-memory system;
+- harness retrospective or improvement;
+- personal-memory semantics;
+- a canonical transcript archive;
+- automatic cross-machine synchronization;
+- background telemetry;
+- a web UI;
+- vector search;
+- cloud storage;
+- provider mutation operations.
 
 A separate consumer may build such capabilities on top of the read contract when a concrete need exists.

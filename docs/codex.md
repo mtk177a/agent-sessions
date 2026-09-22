@@ -35,6 +35,11 @@ The `0.153.0` boundary was checked against the official [`rust-v0.153.0` history
 The additional versions were checked against their official [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs), [`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs), [`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs), and [`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) item definitions and against bounded, read-only structural inspection of saved rollouts; no private contents or identifiers were copied into this repository.
 The two App build versions were also checked against their official [`0.154.0-alpha.6.2`](https://github.com/openai/codex/blob/rust-v0.154.0-alpha.6.2/codex-rs/protocol/src/items.rs) and [`0.155.0-alpha.9.2`](https://raw.githubusercontent.com/openai/codex/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) item definitions and saved rollout structures, including both history modes observed for `0.155.0-alpha.9.2`.
 
+For `list` and `show` interaction time only, the adapter additionally accepts paginated rollouts labeled `0.144.2`, `0.147.0`, and `0.148.0-alpha.9`.\
+Their paginated item and response persistence rules were checked against the corresponding official [`0.144.2`](https://github.com/openai/codex/blob/rust-v0.144.2/codex-rs/rollout/src/policy.rs), [`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs), and [`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs) implementations and bounded structural inspection of saved rollouts.\
+These versions remain unverified for `events` and `verify`.\
+Paginated rollouts labeled `0.98.0` or `0.117.0` remain unsupported for interaction time because those tagged implementations do not establish the observed paginated writing format.
+
 The adapter recognizes the `session_meta`, `event_msg`, and `response_item` rollout envelopes needed for the public observations.\
 For legacy history, `user_message` and `agent_message` events are the canonical message rows, while response tool calls and their persisted output rows provide correlation evidence.\
 Legacy output rows do not persist the internal success value, so the adapter omits the normalized result instead of guessing its outcome.\
@@ -53,10 +58,12 @@ Legacy persisted output still cannot produce a normalized result because it lack
 Errors are normalized from explicit provider error events.\
 Parent and fork relationships are emitted only from explicit `parent_thread_id` and `forked_from_id` metadata.
 
-The latest timestamp of canonical message and tool rows becomes `last_interaction_at`.\
+The latest timestamp of recognized message and tool rows becomes `last_interaction_at`.\
 Completed `FileChange` and `CollabAgentToolCall` items are tool interactions, and `FunctionCallOutput` is a tool result; their timestamps advance it.\
 `SubAgentActivity` is a child-agent status observation and does not advance it.\
 Completed `Extension` items with verified `web.search` or `clock.sleep` kinds are tool interactions; other extension kinds remain uncertain.\
+Completed `WebSearch` items, verified raw `web_search_call` and `tool_search_call` rows, and `tool_search_output` results also advance time; when raw and completed rows describe one operation, the time calculation still takes only the maximum timestamp.\
+The `0.144.2` completed `Sleep` item is a tool interaction.\
 Later token accounting, lifecycle events, and provider errors do not advance it.\
 For `history_base`, the adapter follows the referenced rollout ID and reads only the inherited prefix ending at the recorded ordinal and byte offset.\
 Missing or invalid timestamps, uncertain rows, unresolved history, and input limits prevent a source time rather than triggering a file-time fallback.

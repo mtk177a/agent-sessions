@@ -40,6 +40,11 @@ Codex は `$CODEX_HOME` をデータディレクトリとして文書化して�
 `0.153.0` の境界は、公式の [`rust-v0.153.0` の履歴実装](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs) に対して確認した。\
 追加した版は、公式の [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs)、[`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs)、[`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs)、[`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) の項目定義と、保存済みロールアウトの構造に対する上限付き・読み取り専用の調査で確認した。非公開の本文や識別子は、このリポジトリへ複製していない。
 Codex App の 2 つのビルド版も、公式の [`0.154.0-alpha.6.2`](https://github.com/openai/codex/blob/rust-v0.154.0-alpha.6.2/codex-rs/protocol/src/items.rs) と [`0.155.0-alpha.9.2`](https://raw.githubusercontent.com/openai/codex/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) の項目定義、および保存済みロールアウトの構造に対して確認した。`0.155.0-alpha.9.2` では、観測された 2 種類の履歴方式を調べた。
+
+`list` と `show` のやり取り時刻に限り、アダプターは `0.144.2`、`0.147.0`、`0.148.0-alpha.9` と記されたページ分割形式のロールアウトにも対応する。\
+ページ分割形式の項目とレスポンスの保存規則を、対応する公式実装の [`0.144.2`](https://github.com/openai/codex/blob/rust-v0.144.2/codex-rs/rollout/src/policy.rs)、[`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs)、[`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs) と、保存済みロールアウトの構造に対する上限付きの調査で確認した。\
+これらの版について、`events` と `verify` は引き続き未検証である。\
+`0.98.0` または `0.117.0` と記されたページ分割形式のロールアウトは、そのタグの実装では観測された書き込み形式を説明できないため、やり取り時刻には対応しない。
 `token_usage_record` は管理用の行として扱い、`realtime_item` が現れた場合はやり取りとして正規化できないため、不完全として扱う。
 
 アダプターは、公開される観測に必要な `session_meta`、`event_msg`、`response_item` のロールアウト用エンベロープを認識する。\
@@ -60,11 +65,14 @@ Codex App の 2 つのビルド版も、公式の [`0.154.0-alpha.6.2`](https://
 エラーは、明示されたプロバイダーのエラーイベントから正規化する。\
 親子関係とフォーク関係は、明示された `parent_thread_id` と `forked_from_id` のメタデータからのみ出力する。
 
-正規のメッセージ行とツール行の時刻のうち、最も遅いものを `last_interaction_at` とする。\
+認識したメッセージ行とツール行の時刻のうち、最も遅いものを `last_interaction_at` とする。\
 完了した `FileChange` と `CollabAgentToolCall` はツール操作、`FunctionCallOutput` はツール結果として、その時刻を進める。\
 `SubAgentActivity` は子エージェントの状態通知であり、その時刻を進めない。\
 完了した `Extension` のうち、確認済みの `web.search` と `clock.sleep` はツール操作として扱う。\
 それ以外の拡張項目の種類は、やり取りかどうか未確定として扱う。\
+完了した `WebSearch`、確認済みの生の `web_search_call` と `tool_search_call`、`tool_search_output` の結果も時刻を進める。\
+生の行と完了行が同じ操作を表す場合でも、時刻の計算では最も遅い時刻を一つ求める。\
+`0.144.2` の完了した `Sleep` もツール操作として扱う。\
 それより後のトークン使用量、ライフサイクルイベント、プロバイダーエラーは、この時刻を進めない。\
 `history_base` がある場合、参照先のロールアウト ID をたどり、記録された行番号とバイト位置までの継承部分だけを読み取る。\
 時刻の欠落・不正値、不明確な行、履歴を解決できない場合、入力上限を超えた場合は、ファイルの更新時刻で補わず、ソースの時刻を出さない。

@@ -129,7 +129,7 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 		if selected.meta.HistoryBase != nil {
 			itemSource.VersionHint = nil
 		}
-		if !ambiguous && isSupportedVersion(selected.meta.CLIVersion) {
+		if !ambiguous && supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode) {
 			value, hint, ok := readLastInteractionAt(source.Root, selected, discovered.byRollout)
 			if selected.meta.HistoryBase != nil {
 				itemSource.VersionHint = hint
@@ -143,8 +143,8 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 		}
 		sources = append(sources, itemSource)
 		omissions = append(omissions, relationshipOmissions...)
-		if !isSupportedVersion(selected.meta.CLIVersion) {
-			omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
+		if !supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode) {
+			omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact format has not been verified for interaction time."))
 		}
 	}
 	if missingTimes > 0 {
@@ -172,14 +172,14 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 	if ambiguous {
 		omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
 	}
-	if !isSupportedVersion(selected.meta.CLIVersion) {
-		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
+	if !supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode) {
+		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact format has not been verified for interaction time."))
 	}
 	itemSource, relationshipOmissions := makeSource(source, selected)
 	if selected.meta.HistoryBase != nil {
 		itemSource.VersionHint = nil
 	}
-	if !ambiguous && isSupportedVersion(selected.meta.CLIVersion) {
+	if !ambiguous && supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode) {
 		value, hint, ok := readLastInteractionAt(source.Root, selected, discovered.byRollout)
 		if selected.meta.HistoryBase != nil {
 			itemSource.VersionHint = hint

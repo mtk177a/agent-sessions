@@ -108,3 +108,132 @@ func TestInteractionTimeForObservedLegacyAppVersion(t *testing.T) {
 		t.Fatalf("List() = %#v", listed)
 	}
 }
+
+func TestInteractionTimeOnlySupportsVerifiedOlderPaginatedVersions(t *testing.T) {
+	for _, version := range []string{"0.144.2", "0.147.0", "0.148.0-alpha.9"} {
+		t.Run(version, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+				header(testThreadID, version, "paginated", ""),
+				completedMessage("2026-09-03T10:00:00Z", "UserMessage"),
+				`{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"fictional-search"}}}`,
+				`{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`,
+			})
+			fingerprint := contract.SourceFingerprint(testThreadID)
+			adapter := New()
+			listed := adapter.List(context.Background(), testSource(home))
+			shown := adapter.Show(context.Background(), testSource(home), fingerprint)
+			for _, result := range []struct {
+				name      string
+				sources   []contract.Source
+				omissions []contract.Omission
+			}{
+				{"list", listed.Sources, listed.Omissions},
+				{"show", shown.Sources, shown.Omissions},
+			} {
+				if len(result.sources) != 1 || result.sources[0].LastInteractionAt == nil || *result.sources[0].LastInteractionAt != "2026-09-03T11:00:00Z" || hasOmission(result.omissions, "unsupported_format") || hasOmission(result.omissions, "source_time_unavailable") {
+					t.Fatalf("%s = sources=%#v omissions=%#v", result.name, result.sources, result.omissions)
+				}
+			}
+			if events := adapter.Events(context.Background(), testSource(home), fingerprint); !hasOmission(events.Omissions, "unsupported_format") {
+				t.Fatalf("Events() = %#v", events)
+			}
+			if evidence := adapter.Evidence(context.Background(), testSource(home), fingerprint); !hasOmission(evidence.Omissions, "unsupported_format") {
+				t.Fatalf("Evidence() = %#v", evidence)
+			}
+		})
+	}
+}
+
+func TestOlderInteractionTimeRejectsUnverifiedFormats(t *testing.T) {
+	for _, tc := range []struct{ version, mode string }{
+		{"0.98.0", "paginated"},
+		{"0.117.0", "paginated"},
+		{"0.142.5", "paginated"},
+		{"0.144.2", "legacy"},
+	} {
+		t.Run(tc.version+"_"+tc.mode, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+				header(testThreadID, tc.version, tc.mode, ""),
+				completedMessage("2026-09-03T10:00:00Z", "UserMessage"),
+			})
+			result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+			if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || !hasOmission(result.Omissions, "unsupported_format") || !hasOmission(result.Omissions, "source_time_unavailable") {
+				t.Fatalf("Show() = %#v", result)
+			}
+		})
+	}
+}
+
+func TestOlderInteractionTimeIncludesSearchRowsWithoutCountingStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, version, row string
+	}{
+		{"raw_web_search", "0.147.0", `{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"web_search_call","status":"completed"}}`},
+		{"raw_tool_search", "0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"tool_search_output","execution":"server","status":"completed","tools":[]}}`},
+		{"completed_sleep", "0.144.2", `{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"Sleep","id":"fictional-sleep"}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+				header(testThreadID, tc.version, "paginated", ""),
+				completedMessage("2026-09-03T10:00:00Z", "UserMessage"),
+				tc.row,
+				`{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`,
+			})
+			result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+			if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt == nil || *result.Sources[0].LastInteractionAt != "2026-09-03T11:00:00Z" {
+				t.Fatalf("Show() = %#v", result)
+			}
+		})
+	}
+}
+
+func TestOlderInteractionTimeUsesLatestSearchRecord(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.148.0-alpha.9", "paginated", ""),
+		`{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"fictional-search"}}}`,
+		`{"timestamp":"2026-09-03T11:00:01Z","type":"response_item","payload":{"type":"web_search_call","status":"completed"}}`,
+	})
+	result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+	if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt == nil || *result.Sources[0].LastInteractionAt != "2026-09-03T11:00:01Z" {
+		t.Fatalf("Show() = %#v", result)
+	}
+}
+
+func TestOlderChildWithoutInteractionRemainsListed(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.147.0", "paginated", `,"parent_thread_id":"`+secondThreadID+`"`),
+		`{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`,
+	})
+	result := New().List(context.Background(), testSource(home))
+	if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || len(result.Sources[0].Relationships) == 0 || !hasOmission(result.Omissions, "source_time_unavailable") {
+		t.Fatalf("List() = %#v", result)
+	}
+}
+
+func TestOlderInteractionTimeFailsClosedForUncertainRows(t *testing.T) {
+	for _, tc := range []struct{ version, row string }{
+		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FutureTool","id":"fictional-tool"}}}`},
+		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FunctionCallOutput","id":"fictional-tool"}}}`},
+		{"0.148.0-alpha.9", `{"timestamp":"invalid","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"fictional-search"}}}`},
+		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"future_tool_call"}}`},
+		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"configuration_update"}}`},
+		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"security_risk_score","payload":{}}`},
+		{"0.144.2", completedExtension("2026-09-03T11:00:00Z", "clock.sleep")},
+	} {
+		home := t.TempDir()
+		writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+			header(testThreadID, tc.version, "paginated", ""),
+			completedMessage("2026-09-03T10:00:00Z", "UserMessage"),
+			tc.row,
+		})
+		result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+		if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || !hasOmission(result.Omissions, "source_time_unavailable") {
+			t.Fatalf("Show() = %#v", result)
+		}
+	}
+}

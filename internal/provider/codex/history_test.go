@@ -63,6 +63,25 @@ func TestInheritedHistoryTimeAndHintIgnoreExcludedSuffix(t *testing.T) {
 	}
 }
 
+func TestInheritedHistoryReadsVerifiedOlderTimeFormat(t *testing.T) {
+	home := t.TempDir()
+	base := []string{
+		withOrdinal(0, header(testThreadID, "0.147.0", "paginated", "")),
+		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+	}
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), base)
+	cutoff := len(base[0]) + 1 + len(base[1]) + 1
+	extra := fmt.Sprintf(`,"history_base":{"thread_id":"%s","end_ordinal_exclusive":2,"end_byte_offset":%d}`, testThreadID, cutoff)
+	writeRollout(t, rolloutPath(home, "sessions", secondThreadID), []string{
+		withOrdinal(2, header(secondThreadID, "0.153.4", "paginated", extra)),
+		withOrdinal(3, `{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`),
+	})
+	result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(secondThreadID))
+	if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt == nil || *result.Sources[0].LastInteractionAt != "2026-09-03T10:00:00Z" || result.Sources[0].VersionHint == nil {
+		t.Fatalf("Show() = %#v", result)
+	}
+}
+
 func withOrdinal(ordinal int, row string) string {
 	return fmt.Sprintf(`{"ordinal":%d,`, ordinal) + row[1:]
 }

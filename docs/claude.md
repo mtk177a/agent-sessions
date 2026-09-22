@@ -44,6 +44,8 @@ Known bookkeeping rows are not public observations and are ignored.\
 Unknown rows, unknown content blocks, attachments, reasoning blocks, internal user metadata, and unsupported system observations are reported as omissions.
 
 The latest timestamp of supported user and assistant message or tool rows becomes `last_interaction_at`.\
+For `2.1.177`, the observed `agent_listing_delta`, `command_permissions`, `deferred_tools_delta`, `diagnostics`, `edited_text_file`, `opened_file_in_ide`, `plan_mode`, `plan_mode_exit`, `selected_lines_in_ide`, `skill_listing`, and `task_reminder` attachments, and `away_summary` and `informational` system rows, are non-interaction observations and do not advance it.\
+Other attachments, including a possible queued command, remain uncertain and prevent a source time.\
 Bookkeeping, supported non-interaction system rows, and provider API errors do not advance it.\
 Missing or invalid timestamps, unknown potentially interactive rows or blocks, and ambiguous transcripts prevent a source time.
 

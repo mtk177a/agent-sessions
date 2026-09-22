@@ -67,6 +67,7 @@ type transcriptRow struct {
 	IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
 	Message           json.RawMessage `json:"message"`
 	Content           json.RawMessage `json:"content"`
+	Attachment        json.RawMessage `json:"attachment"`
 }
 
 type messagePayload struct {

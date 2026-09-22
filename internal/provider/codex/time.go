@@ -1,52 +1,60 @@
 package codex
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
 	"time"
 
 	"github.com/mtk177a/agent-sessions/internal/contract"
-	"github.com/mtk177a/agent-sessions/internal/safeio"
+)
+
+const (
+	maxTimeHistoryBytes = 128 << 20
+	maxTimeRowBytes     = 4 << 20
 )
 
 // readLastInteractionAt uses only recognized conversation rows. An unfamiliar row
 // may contain a later interaction, so it makes the timestamp unavailable.
-func readLastInteractionAt(root string, item artifact) (string, bool) {
-	if item.meta.HistoryBase != nil || item.compressed {
-		return "", false
-	}
-	data, err := safeio.ReadFileWithin(root, item.relative, maxArtifactBytes)
+func readLastInteractionAt(root string, item artifact, byRollout map[string][]artifact) (string, *contract.VersionHint, bool) {
+	spans, err := resolveHistory(item, byRollout)
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 64<<10), maxRowBytes)
 	var latest time.Time
-	for scanner.Scan() {
-		var line rolloutLine
-		if safeio.DecodeJSON(scanner.Bytes(), contract.MaxJSONDepth, &line) != nil {
-			return "", false
+	safeTime := true
+	for _, span := range spans {
+		if !isSupportedVersion(span.item.meta.CLIVersion) {
+			return "", nil, false
 		}
-		activity, safe := codexInteractionRow(item.meta.HistoryMode, item.meta.CLIVersion, line)
+	}
+	hintValue, err := walkHistory(root, spans, maxTimeHistoryBytes, maxTimeRowBytes, func(origin artifact, line rolloutLine) {
+		activity, safe := codexInteractionRow(origin.meta.HistoryMode, origin.meta.CLIVersion, line)
 		if !safe {
-			return "", false
+			safeTime = false
+			return
 		}
 		if !activity {
-			continue
+			return
 		}
 		at, err := time.Parse(time.RFC3339Nano, line.Timestamp)
 		if err != nil {
-			return "", false
+			safeTime = false
+			return
 		}
 		if latest.IsZero() || at.After(latest) {
 			latest = at
 		}
+	})
+	if err != nil {
+		return "", nil, false
 	}
-	if scanner.Err() != nil || latest.IsZero() {
-		return "", false
+	var hint *contract.VersionHint
+	if item.meta.HistoryBase != nil {
+		hint = &contract.VersionHint{Kind: "content_hash", Value: hintValue}
 	}
-	return latest.UTC().Format(time.RFC3339Nano), true
+	if !safeTime || latest.IsZero() {
+		return "", hint, false
+	}
+	return latest.UTC().Format(time.RFC3339Nano), hint, true
 }
 
 func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, bool) {
@@ -54,7 +62,7 @@ func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, b
 	case "session_meta", "inter_agent_communication_metadata", "compacted", "turn_context", "world_state", "security_risk_score":
 		return false, true
 	case "token_usage_record":
-		return false, version == "0.153.0"
+		return false, supportsTokenUsageRecord(version)
 	case "inter_agent_communication", "realtime_item":
 		return false, false
 	case "event_msg":
@@ -71,14 +79,19 @@ func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, b
 		if historyMode == "paginated" && event.Type == "item_completed" {
 			var completed struct {
 				Type string `json:"type"`
+				Kind string `json:"kind"`
+				ID   string `json:"id"`
 			}
 			if json.Unmarshal(event.Item, &completed) != nil || !knownTurnItemType(completed.Type) {
 				return false, false
 			}
 			switch completed.Type {
-			case "UserMessage", "AgentMessage", "CommandExecution", "McpToolCall", "DynamicToolCall":
+			case "UserMessage", "AgentMessage", "CommandExecution", "McpToolCall", "DynamicToolCall", "CollabAgentToolCall", "FileChange", "FunctionCallOutput":
 				return true, true
-			case "Reasoning", "Plan", "ContextCompaction", "HookPrompt", "EnteredReviewMode", "ExitedReviewMode":
+			case "Extension":
+				known := completed.Kind == "web.search" || completed.Kind == "clock.sleep"
+				return known && completed.ID != "", known && completed.ID != ""
+			case "Reasoning", "Plan", "ContextCompaction", "HookPrompt", "EnteredReviewMode", "ExitedReviewMode", "SubAgentActivity":
 				return false, true
 			default:
 				return false, false

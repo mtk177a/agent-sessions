@@ -232,19 +232,22 @@ A provider-native source may change while retaining the same identity, for examp
 
 ### Version hint
 
-Source listings use inexpensive metadata to indicate whether a source may have changed.
+Source listings expose a version hint to indicate whether a source may have changed.\
+Most hints use inexpensive metadata; Codex inherited history hashes the included bytes already scanned for interaction time.
 
 Depending on the provider, useful hints may include:
 
 - provider-reported update time;
 - artifact modification time;
 - artifact size;
+- included source content when its effective history spans multiple artifacts;
 - another stable provider metadata value.
 
 A version hint is an optimization signal.\
 It is not durable cryptographic evidence.
 
-Each provider owns the meaning and `v0` algorithm namespace of its current version hint.\
+Each provider owns the meaning and independently versioned algorithm namespace of its hints.\
+Codex uses `v0` for current-artifact statistics and `v1` for included inherited content.\
 Changing the public JSON schema version does not change an otherwise identical hint.
 
 ### Verified version
@@ -270,7 +273,7 @@ A downstream consumer may implement incremental review as follows:
 list sources
       │
       ▼
-compare cheap version hints
+compare version hints
 with consumer-owned state
       │
       ├── unchanged
@@ -468,7 +471,7 @@ source access:
   avoid complete-history reads when cheaper metadata can narrow the source set
 ```
 
-Codex and Claude Code `list` now read bounded main transcripts to establish interaction time.\
+Codex `list` reads bounded effective rollout history, including referenced prefixes, and Claude Code `list` reads bounded main transcripts to establish interaction time.\
 This increases read work but causes no persistent `agent-sessions` writes.
 
 Performance optimization must not introduce periodic whole-history scans merely to reduce interactive latency.\

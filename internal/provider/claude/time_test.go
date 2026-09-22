@@ -73,3 +73,31 @@ func TestInteractionTimeIsUnavailableForUnsafeClaudeRows(t *testing.T) {
 		})
 	}
 }
+
+func TestInteractionTimeIgnoresObservedNonInteractiveAttachments(t *testing.T) {
+	home := t.TempDir()
+	lines := []string{timedRow("2.1.177", "2026-09-03T10:00:00Z", "user", `{"role":"user","content":"hello"}`, "")}
+	for _, kind := range []string{"agent_listing_delta", "command_permissions", "deferred_tools_delta", "diagnostics", "edited_text_file", "opened_file_in_ide", "plan_mode", "plan_mode_exit", "selected_lines_in_ide", "skill_listing", "task_reminder"} {
+		lines = append(lines, `{"timestamp":"2026-09-03T12:00:00Z","type":"attachment","sessionId":"`+testSessionID+`","version":"2.1.177","attachment":{"type":"`+kind+`"}}`)
+	}
+	for _, subtype := range []string{"away_summary", "informational"} {
+		lines = append(lines, `{"timestamp":"2026-09-03T13:00:00Z","type":"system","sessionId":"`+testSessionID+`","version":"2.1.177","subtype":"`+subtype+`","content":"fictional notice"}`)
+	}
+	writeTranscript(t, home, "fictional-project", testSessionID, lines)
+	listed := New().List(context.Background(), testSource(home))
+	if len(listed.Sources) != 1 || listed.Sources[0].LastInteractionAt == nil || *listed.Sources[0].LastInteractionAt != "2026-09-03T10:00:00Z" {
+		t.Fatalf("List() = %#v", listed)
+	}
+}
+
+func TestInteractionTimeRemainsUnknownForCommandAttachment(t *testing.T) {
+	home := t.TempDir()
+	writeTranscript(t, home, "fictional-project", testSessionID, []string{
+		timedRow("2.1.177", "2026-09-03T10:00:00Z", "user", `{"role":"user","content":"hello"}`, ""),
+		`{"timestamp":"2026-09-03T12:00:00Z","type":"attachment","sessionId":"` + testSessionID + `","version":"2.1.177","attachment":{"type":"queued_command","prompt":"fictional task"}}`,
+	})
+	listed := New().List(context.Background(), testSource(home))
+	if len(listed.Sources) != 1 || listed.Sources[0].LastInteractionAt != nil {
+		t.Fatalf("List() = %#v", listed)
+	}
+}

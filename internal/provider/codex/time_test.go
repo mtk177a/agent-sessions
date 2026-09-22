@@ -73,3 +73,38 @@ func TestInteractionTimeIsUnavailableForUnsafeCodexRows(t *testing.T) {
 		})
 	}
 }
+
+func TestInteractionTimeForVerifiedCodexVersionsAndItems(t *testing.T) {
+	for _, version := range []string{"0.152.0", "0.153.3", "0.153.4", "0.154.0", "0.154.0-alpha.6.2", "0.155.0-alpha.9.2"} {
+		t.Run(version, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+				header(testThreadID, version, "paginated", ""),
+				`{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"hello"}]}}}`,
+				`{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","id":"change-1"}}}`,
+				`{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CollabAgentToolCall","id":"collab-1"}}}`,
+				`{"timestamp":"2026-09-03T13:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"SubAgentActivity","id":"activity-1"}}}`,
+				`{"timestamp":"2026-09-03T14:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FunctionCallOutput","id":"output-1"}}}`,
+				`{"timestamp":"2026-09-03T15:00:00Z","type":"token_usage_record","payload":{}}`,
+			})
+			listed := New().List(context.Background(), testSource(home))
+			if len(listed.Sources) != 1 || listed.Sources[0].LastInteractionAt == nil || *listed.Sources[0].LastInteractionAt != "2026-09-03T14:00:00Z" {
+				t.Fatalf("List() = %#v", listed)
+			}
+		})
+	}
+}
+
+func TestInteractionTimeForObservedLegacyAppVersion(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.155.0-alpha.9.2", "legacy", ""),
+		`{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}`,
+		`{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"agent_message","message":"hi"}}`,
+		`{"timestamp":"2026-09-03T12:00:00Z","type":"token_usage_record","payload":{}}`,
+	})
+	listed := New().List(context.Background(), testSource(home))
+	if len(listed.Sources) != 1 || listed.Sources[0].LastInteractionAt == nil || *listed.Sources[0].LastInteractionAt != "2026-09-03T11:00:00Z" {
+		t.Fatalf("List() = %#v", listed)
+	}
+}

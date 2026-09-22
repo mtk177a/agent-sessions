@@ -48,6 +48,8 @@ Claude Code は各行の内部形式がリリース間で変わる可能性が�
 未知の行、未知の内容ブロック、添付ファイル、推論ブロック、内部ユーザーメタデータ、未対応のシステム観測は省略として報告する。
 
 対応するユーザーとアシスタントのメッセージ行またはツール行の時刻のうち、最も遅いものを `last_interaction_at` とする。\
+`2.1.177` では、確認した `agent_listing_delta`、`command_permissions`、`deferred_tools_delta`、`diagnostics`、`edited_text_file`、`opened_file_in_ide`、`plan_mode`、`plan_mode_exit`、`selected_lines_in_ide`、`skill_listing`、`task_reminder` の添付行と、`away_summary`、`informational` のシステム行は非対話の観測として扱い、この時刻を進めない。\
+コマンド待機の可能性がある添付行を含め、それ以外の添付行は意味を確定できないため、ソースの時刻を出さない。\
 管理用の行、対応する非対話のシステム行、プロバイダー API エラーは、この時刻を進めない。\
 時刻の欠落・不正値、やり取りの可能性がある未知の行やブロック、曖昧なトランスクリプトがある場合は、ソースの時刻を出さない。
 

@@ -62,10 +62,13 @@ type sessionMeta struct {
 }
 
 type historyPosition struct {
-	ThreadID string `json:"thread_id"`
+	ThreadID            string `json:"thread_id"`
+	EndOrdinalExclusive uint64 `json:"end_ordinal_exclusive"`
+	EndByteOffset       uint64 `json:"end_byte_offset"`
 }
 
 type rolloutLine struct {
+	Ordinal   *uint64         `json:"ordinal"`
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
 	Payload   json.RawMessage `json:"payload"`
@@ -88,6 +91,7 @@ type completedItem struct {
 
 type discovery struct {
 	byFingerprint map[string][]artifact
+	byRollout     map[string][]artifact
 	omissions     []contract.Omission
 }
 
@@ -122,8 +126,15 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 			omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
 		}
 		itemSource, relationshipOmissions := makeSource(source, selected)
+		if selected.meta.HistoryBase != nil {
+			itemSource.VersionHint = nil
+		}
 		if !ambiguous && isSupportedVersion(selected.meta.CLIVersion) {
-			if value, ok := readLastInteractionAt(source.Root, selected); ok {
+			value, hint, ok := readLastInteractionAt(source.Root, selected, discovered.byRollout)
+			if selected.meta.HistoryBase != nil {
+				itemSource.VersionHint = hint
+			}
+			if ok {
 				itemSource.LastInteractionAt = &value
 			}
 		}
@@ -165,8 +176,15 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
 	}
 	itemSource, relationshipOmissions := makeSource(source, selected)
+	if selected.meta.HistoryBase != nil {
+		itemSource.VersionHint = nil
+	}
 	if !ambiguous && isSupportedVersion(selected.meta.CLIVersion) {
-		if value, ok := readLastInteractionAt(source.Root, selected); ok {
+		value, hint, ok := readLastInteractionAt(source.Root, selected, discovered.byRollout)
+		if selected.meta.HistoryBase != nil {
+			itemSource.VersionHint = hint
+		}
+		if ok {
 			itemSource.LastInteractionAt = &value
 		}
 	}
@@ -251,7 +269,7 @@ func (a *Adapter) find(source config.Source, fingerprint string) (artifact, []co
 }
 
 func (a *Adapter) discover(source config.Source) (discovery, error) {
-	result := discovery{byFingerprint: map[string][]artifact{}, omissions: []contract.Omission{}}
+	result := discovery{byFingerprint: map[string][]artifact{}, byRollout: map[string][]artifact{}, omissions: []contract.Omission{}}
 	discoveredFiles := 0
 	for _, collection := range []string{"sessions", "archived_sessions"} {
 		remaining := maxDiscoveredFiles - discoveredFiles
@@ -301,6 +319,7 @@ func (a *Adapter) discover(source config.Source) (discovery, error) {
 			item := artifact{relative: entry.Relative, collection: collection, size: entry.Size, modTime: entry.ModTime, threadID: strings.ToLower(meta.ID), rolloutID: strings.ToLower(rolloutID), timestamp: timestamp, meta: meta}
 			fingerprint := contract.SourceFingerprint(item.threadID)
 			result.byFingerprint[fingerprint] = append(result.byFingerprint[fingerprint], item)
+			result.byRollout[item.rolloutID] = append(result.byRollout[item.rolloutID], item)
 		}
 	}
 	return result, nil
@@ -680,7 +699,7 @@ func inspectRowsVersion(historyMode, version string, data []byte) ([]rolloutLine
 			omissions = append(omissions, omission("malformed_record", "events", "A Codex JSONL row could not be decoded."))
 			continue
 		}
-		if version == "0.153.0" && line.Type == "token_usage_record" {
+		if supportsTokenUsageRecord(version) && line.Type == "token_usage_record" {
 			continue
 		}
 		if !knownTopLevel(line.Type) {
@@ -732,7 +751,7 @@ func knownResponseType(value string) bool {
 
 func knownTurnItemType(value string) bool {
 	switch value {
-	case "UserMessage", "HookPrompt", "AgentMessage", "Plan", "Reasoning", "CommandExecution", "DynamicToolCall", "CollabAgentToolCall", "SubAgentActivity", "WebSearch", "ImageView", "Extension", "ImageGeneration", "EnteredReviewMode", "ExitedReviewMode", "FileChange", "McpToolCall", "ContextCompaction":
+	case "UserMessage", "FunctionCallOutput", "HookPrompt", "AgentMessage", "Plan", "Reasoning", "CommandExecution", "DynamicToolCall", "CollabAgentToolCall", "SubAgentActivity", "WebSearch", "ImageView", "Extension", "ImageGeneration", "EnteredReviewMode", "ExitedReviewMode", "FileChange", "McpToolCall", "ContextCompaction":
 		return true
 	default:
 		return false
@@ -749,7 +768,16 @@ func knownTopLevel(value string) bool {
 }
 
 func isSupportedVersion(value string) bool {
-	return value == supportedVersion || value == "0.153.0"
+	switch value {
+	case supportedVersion, "0.152.0", "0.153.0", "0.153.3", "0.153.4", "0.154.0", "0.154.0-alpha.6.2", "0.155.0-alpha.9.2":
+		return true
+	default:
+		return false
+	}
+}
+
+func supportsTokenUsageRecord(value string) bool {
+	return value != supportedVersion && isSupportedVersion(value)
 }
 
 func knownEventType(value string) bool {

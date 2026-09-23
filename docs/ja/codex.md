@@ -41,10 +41,14 @@ Codex は `$CODEX_HOME` をデータディレクトリとして文書化して�
 追加した版は、公式の [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs)、[`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs)、[`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs)、[`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) の項目定義と、保存済みロールアウトの構造に対する上限付き・読み取り専用の調査で確認した。非公開の本文や識別子は、このリポジトリへ複製していない。
 Codex App の 2 つのビルド版も、公式の [`0.154.0-alpha.6.2`](https://github.com/openai/codex/blob/rust-v0.154.0-alpha.6.2/codex-rs/protocol/src/items.rs) と [`0.155.0-alpha.9.2`](https://raw.githubusercontent.com/openai/codex/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) の項目定義、および保存済みロールアウトの構造に対して確認した。`0.155.0-alpha.9.2` では、観測された 2 種類の履歴方式を調べた。
 
-`list` と `show` のやり取り時刻に限り、アダプターは `0.144.2`、`0.147.0`、`0.148.0-alpha.9` と記されたページ分割形式のロールアウトにも対応する。\
-ページ分割形式の項目とレスポンスの保存規則を、対応する公式実装の [`0.144.2`](https://github.com/openai/codex/blob/rust-v0.144.2/codex-rs/rollout/src/policy.rs)、[`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs)、[`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs) と、保存済みロールアウトの構造に対する上限付きの調査で確認した。\
+`list` と `show` のやり取り時刻に限り、アダプターは `0.98.0`、`0.117.0`、`0.144.2`、`0.147.0`、`0.148.0-alpha.9` と記されたページ分割形式のロールアウトにも対応する。\
+後者の 3 版について、ページ分割形式の項目とレスポンスの保存規則を、対応する公式実装の [`0.144.2`](https://github.com/openai/codex/blob/rust-v0.144.2/codex-rs/rollout/src/policy.rs)、[`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs)、[`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs) と、保存済みロールアウトの構造に対する上限付きの調査で確認した。\
 これらの版について、`events` と `verify` は引き続き未検証である。\
-`0.98.0` または `0.117.0` と記されたページ分割形式のロールアウトは、そのタグの実装では観測された書き込み形式を説明できないため、やり取り時刻には対応しない。
+元の [`0.98.0`](https://github.com/openai/codex/blob/rust-v0.98.0/codex-rs/protocol/src/protocol.rs) と [`0.117.0`](https://github.com/openai/codex/blob/rust-v0.117.0/codex-rs/protocol/src/protocol.rs) の形式には、ページ分割形式の行番号がなかった。\
+Codex の[旧形式からページ分割形式への移行処理](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs)は、保存行を書き換えるとき、ヘッダーの CLI 版を保持する。\
+この 2 つの版名については、ページ分割形式で行番号が連続し、版ごとに確認した行の種類だけが含まれる移行後の形式に限って、やり取り時刻に対応する。\
+未知の行、旧形式の記録、行番号の不一致があれば時刻を出さない。\
+ヘッダーの版名だけでは対応可否を判断しない。
 `token_usage_record` は管理用の行として扱い、`realtime_item` が現れた場合はやり取りとして正規化できないため、不完全として扱う。
 
 アダプターは、公開される観測に必要な `session_meta`、`event_msg`、`response_item` のロールアウト用エンベロープを認識する。\
@@ -73,6 +77,8 @@ Codex App の 2 つのビルド版も、公式の [`0.154.0-alpha.6.2`](https://
 完了した `WebSearch`、確認済みの生の `web_search_call` と `tool_search_call`、`tool_search_output` の結果も時刻を進める。\
 生の行と完了行が同じ操作を表す場合でも、時刻の計算では最も遅い時刻を一つ求める。\
 `0.144.2` の完了した `Sleep` もツール操作として扱う。\
+移行後の `0.98.0` と `0.117.0` のロールアウトでは、観測済みのメッセージ、ツール、検索、管理用の行だけを分類する。\
+完了した `Reasoning`、`Plan`、`ContextCompaction` と `compacted` 行は時刻を進めない。\
 それより後のトークン使用量、ライフサイクルイベント、プロバイダーエラーは、この時刻を進めない。\
 `history_base` がある場合、参照先のロールアウト ID をたどり、記録された行番号とバイト位置までの継承部分だけを読み取る。\
 時刻の欠落・不正値、不明確な行、履歴を解決できない場合、入力上限を超えた場合は、ファイルの更新時刻で補わず、ソースの時刻を出さない。

@@ -62,8 +62,8 @@ func resolveHistory(selected artifact, byRollout map[string][]artifact) ([]histo
 }
 
 // walkHistory validates ordinal and byte boundaries while streaming effective rows.
-// Its limits belong to the caller rather than the shared history representation.
-func walkHistory(root string, spans []historySpan, maxBytes, maxRowBytes int64, visit func(artifact, rolloutLine)) (string, error) {
+// The caller supplies limits and whether a single-span history requires ordinals.
+func walkHistory(root string, spans []historySpan, maxBytes, maxRowBytes int64, requireOrdinals bool, visit func(artifact, rolloutLine)) (string, error) {
 	if len(spans) == 0 || maxBytes <= 0 || maxRowBytes <= 0 {
 		return "", errors.New("invalid history reader limits")
 	}
@@ -79,7 +79,7 @@ func walkHistory(root string, spans []historySpan, maxBytes, maxRowBytes int64, 
 	var count [8]byte
 	binary.BigEndian.PutUint64(count[:], uint64(len(spans)))
 	_, _ = h.Write(count[:])
-	requireOrdinals := len(spans) > 1
+	requireOrdinals = requireOrdinals || len(spans) > 1
 	var nextOrdinal uint64
 	for i, span := range spans {
 		if err := walkHistorySpan(root, span, maxRowBytes, requireOrdinals, i == len(spans)-1, &nextOrdinal, h, visit); err != nil {

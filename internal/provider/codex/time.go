@@ -26,11 +26,15 @@ func supportsInteractionTime(version, historyMode string) bool {
 
 func isOlderTimeVersion(version string) bool {
 	switch version {
-	case "0.144.2", "0.147.0", "0.148.0-alpha.9":
+	case "0.98.0", "0.117.0", "0.144.2", "0.147.0", "0.148.0-alpha.9":
 		return true
 	default:
 		return false
 	}
+}
+
+func isMigratedLegacyTimeVersion(version string) bool {
+	return version == "0.98.0" || version == "0.117.0"
 }
 
 // readLastInteractionAt uses only recognized conversation rows. An unfamiliar row
@@ -42,12 +46,14 @@ func readLastInteractionAt(root string, item artifact, byRollout map[string][]ar
 	}
 	var latest time.Time
 	safeTime := true
+	requireOrdinals := false
 	for _, span := range spans {
 		if !supportsInteractionTime(span.item.meta.CLIVersion, span.item.meta.HistoryMode) {
 			return "", nil, false
 		}
+		requireOrdinals = requireOrdinals || isMigratedLegacyTimeVersion(span.item.meta.CLIVersion)
 	}
-	hintValue, err := walkHistory(root, spans, maxTimeHistoryBytes, maxTimeRowBytes, func(origin artifact, line rolloutLine) {
+	hintValue, err := walkHistory(root, spans, maxTimeHistoryBytes, maxTimeRowBytes, requireOrdinals, func(origin artifact, line rolloutLine) {
 		activity, safe := codexInteractionRow(origin.meta.HistoryMode, origin.meta.CLIVersion, line)
 		if !safe {
 			safeTime = false
@@ -79,6 +85,9 @@ func readLastInteractionAt(root string, item artifact, byRollout map[string][]ar
 }
 
 func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, bool) {
+	if isMigratedLegacyTimeVersion(version) && (historyMode != "paginated" || !knownMigratedTimeRow(version, line)) {
+		return false, false
+	}
 	switch line.Type {
 	case "session_meta", "inter_agent_communication_metadata", "compacted", "turn_context", "world_state":
 		return false, true
@@ -160,6 +169,54 @@ func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, b
 	default:
 		return false, false
 	}
+}
+
+// These headers retain the old CLI version after Codex rewrites the rollout.
+// Only the observed migrated row vocabulary is accepted for interaction time.
+func knownMigratedTimeRow(version string, line rolloutLine) bool {
+	switch line.Type {
+	case "session_meta", "turn_context":
+		return true
+	case "compacted":
+		return version == "0.117.0"
+	case "event_msg":
+		var event struct {
+			Type string          `json:"type"`
+			Item json.RawMessage `json:"item"`
+		}
+		if json.Unmarshal(line.Payload, &event) != nil {
+			return false
+		}
+		switch event.Type {
+		case "task_started", "task_complete", "token_count", "turn_aborted":
+			return true
+		case "item_completed":
+			var item struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(event.Item, &item) != nil {
+				return false
+			}
+			switch item.Type {
+			case "UserMessage", "AgentMessage", "Reasoning":
+				return true
+			case "CommandExecution", "ContextCompaction", "FileChange", "McpToolCall", "Plan", "WebSearch":
+				return version == "0.117.0"
+			}
+		}
+	case "response_item":
+		var response struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(line.Payload, &response) != nil {
+			return false
+		}
+		switch response.Type {
+		case "custom_tool_call", "custom_tool_call_output", "function_call", "function_call_output", "message", "reasoning", "web_search_call":
+			return true
+		}
+	}
+	return false
 }
 
 func knownOlderTimeEventType(value string) bool {

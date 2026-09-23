@@ -82,6 +82,47 @@ func TestInheritedHistoryReadsVerifiedOlderTimeFormat(t *testing.T) {
 	}
 }
 
+func TestInheritedHistoryReadsMigratedOlderPrefixes(t *testing.T) {
+	home := t.TempDir()
+	basePath := rolloutPath(home, "sessions", testThreadID)
+	base := []string{
+		withOrdinal(0, header(testThreadID, "0.98.0", "paginated", "")),
+		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+		withOrdinal(2, completedMessage("2026-09-03T23:00:00Z", "AgentMessage")),
+	}
+	writeRollout(t, basePath, base)
+	cutoff := len(base[0]) + 1 + len(base[1]) + 1
+	extra := fmt.Sprintf(`,"history_base":{"thread_id":"%s","end_ordinal_exclusive":2,"end_byte_offset":%d}`, testThreadID, cutoff)
+	writeRollout(t, rolloutPath(home, "sessions", secondThreadID), []string{
+		withOrdinal(2, header(secondThreadID, "0.117.0", "paginated", extra)),
+		withOrdinal(3, `{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"web_search_call"}}`),
+	})
+	read := func() (string, string) {
+		t.Helper()
+		result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(secondThreadID))
+		if result.Status != contract.StatusComplete || len(result.Sources) != 1 || result.Sources[0].LastInteractionAt == nil || result.Sources[0].VersionHint == nil || result.Sources[0].VersionHint.Kind != "content_hash" {
+			t.Fatalf("Show() = %#v", result)
+		}
+		return *result.Sources[0].LastInteractionAt, result.Sources[0].VersionHint.Value
+	}
+	gotTime, hint := read()
+	if gotTime != "2026-09-03T11:00:00Z" {
+		t.Fatalf("time = %q", gotTime)
+	}
+	base = append(base, withOrdinal(3, completedMessage("2026-09-04T00:00:00Z", "AgentMessage")))
+	writeRollout(t, basePath, base)
+	gotTime, laterHint := read()
+	if gotTime != "2026-09-03T11:00:00Z" || laterHint != hint {
+		t.Fatalf("excluded suffix affected history: time=%q hint=%q", gotTime, laterHint)
+	}
+	base[1] = withOrdinal(1, completedMessage("2026-09-03T10:00:01Z", "UserMessage"))
+	writeRollout(t, basePath, base)
+	_, changedHint := read()
+	if changedHint == hint {
+		t.Fatal("included prefix changed without changing version hint")
+	}
+}
+
 func withOrdinal(ordinal int, row string) string {
 	return fmt.Sprintf(`{"ordinal":%d,`, ordinal) + row[1:]
 }
@@ -216,7 +257,7 @@ func TestHistoryReaderUsesCallerLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, limits := range [][2]int64{{1, maxTimeRowBytes}, {maxTimeHistoryBytes, 64}} {
-		if _, err := walkHistory(home, spans, limits[0], limits[1], func(artifact, rolloutLine) {}); err == nil {
+		if _, err := walkHistory(home, spans, limits[0], limits[1], false, func(artifact, rolloutLine) {}); err == nil {
 			t.Fatalf("walkHistory succeeded with limits %v", limits)
 		}
 	}

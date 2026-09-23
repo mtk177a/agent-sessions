@@ -147,8 +147,8 @@ func TestInteractionTimeOnlySupportsVerifiedOlderPaginatedVersions(t *testing.T)
 
 func TestOlderInteractionTimeRejectsUnverifiedFormats(t *testing.T) {
 	for _, tc := range []struct{ version, mode string }{
-		{"0.98.0", "paginated"},
-		{"0.117.0", "paginated"},
+		{"0.98.0", "legacy"},
+		{"0.117.0", "legacy"},
 		{"0.142.5", "paginated"},
 		{"0.144.2", "legacy"},
 	} {
@@ -161,6 +161,109 @@ func TestOlderInteractionTimeRejectsUnverifiedFormats(t *testing.T) {
 			result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
 			if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || !hasOmission(result.Omissions, "unsupported_format") || !hasOmission(result.Omissions, "source_time_unavailable") {
 				t.Fatalf("Show() = %#v", result)
+			}
+		})
+	}
+}
+
+func TestMigratedOlderRolloutsExposeInteractionTimeOnly(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		rows    []string
+		want    string
+	}{
+		{"0.98.0", []string{
+			completedMessage("2026-09-03T10:00:00Z", "UserMessage"),
+			`{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"function_call"}}`,
+			`{"timestamp":"2026-09-03T12:00:00Z","type":"response_item","payload":{"type":"function_call_output"}}`,
+			`{"timestamp":"2026-09-03T12:30:00Z","type":"response_item","payload":{"type":"web_search_call"}}`,
+			`{"timestamp":"2026-09-03T13:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`,
+		}, "2026-09-03T12:30:00Z"},
+		{"0.117.0", []string{
+			completedMessage("2026-09-03T10:00:00Z", "UserMessage"),
+			`{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"web_search_call"}}`,
+			`{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"fictional-search"}}}`,
+			`{"timestamp":"2026-09-03T12:30:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"fictional-command"}}}`,
+			`{"timestamp":"2026-09-03T12:45:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","id":"fictional-change"}}}`,
+			`{"timestamp":"2026-09-03T13:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"fictional-tool"}}}`,
+			`{"timestamp":"2026-09-03T14:00:00Z","type":"compacted","payload":{}}`,
+		}, "2026-09-03T13:00:00Z"},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			home := t.TempDir()
+			rows := []string{withOrdinal(0, header(testThreadID, tc.version, "paginated", ""))}
+			for i, row := range tc.rows {
+				rows = append(rows, withOrdinal(i+1, row))
+			}
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), rows)
+			adapter := New()
+			fingerprint := contract.SourceFingerprint(testThreadID)
+			listed := adapter.List(context.Background(), testSource(home))
+			shown := adapter.Show(context.Background(), testSource(home), fingerprint)
+			for _, result := range []struct {
+				name      string
+				source    contract.Source
+				omissions []contract.Omission
+			}{
+				{"list", listed.Sources[0], listed.Omissions},
+				{"show", shown.Sources[0], shown.Omissions},
+			} {
+				if result.source.LastInteractionAt == nil || *result.source.LastInteractionAt != tc.want || result.source.VersionHint == nil || result.source.VersionHint.Kind != "stat_hash" || hasOmission(result.omissions, "unsupported_format") {
+					t.Fatalf("%s = source=%#v omissions=%#v", result.name, result.source, result.omissions)
+				}
+			}
+			if events := adapter.Events(context.Background(), testSource(home), fingerprint); !hasOmission(events.Omissions, "unsupported_format") {
+				t.Fatalf("Events() = %#v", events)
+			}
+			if evidence := adapter.Evidence(context.Background(), testSource(home), fingerprint); !hasOmission(evidence.Omissions, "unsupported_format") {
+				t.Fatalf("Evidence() = %#v", evidence)
+			}
+		})
+	}
+}
+
+func TestMigratedOlderRolloutsRejectUnverifiedShapeAndRows(t *testing.T) {
+	for _, tc := range []struct {
+		name, version string
+		rows          []string
+	}{
+		{"missing_ordinal", "0.98.0", []string{withOrdinal(0, header(testThreadID, "0.98.0", "paginated", "")), completedMessage("2026-09-03T10:00:00Z", "UserMessage")}},
+		{"duplicate_ordinal", "0.117.0", []string{withOrdinal(0, header(testThreadID, "0.117.0", "paginated", "")), withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")), withOrdinal(1, completedMessage("2026-09-03T11:00:00Z", "AgentMessage"))}},
+		{"unverified_item", "0.98.0", []string{withOrdinal(0, header(testThreadID, "0.98.0", "paginated", "")), withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "CommandExecution"))}},
+		{"unverified_response", "0.117.0", []string{withOrdinal(0, header(testThreadID, "0.117.0", "paginated", "")), withOrdinal(1, `{"timestamp":"2026-09-03T10:00:00Z","type":"response_item","payload":{"type":"tool_search_call"}}`)}},
+		{"invalid_time", "0.117.0", []string{withOrdinal(0, header(testThreadID, "0.117.0", "paginated", "")), withOrdinal(1, completedMessage("not-a-time", "UserMessage"))}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), tc.rows)
+			result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+			if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || !hasOmission(result.Omissions, "source_time_unavailable") {
+				t.Fatalf("Show() = %#v", result)
+			}
+		})
+	}
+}
+
+func TestMigratedOlderChildTimeTracksInteraction(t *testing.T) {
+	for _, tc := range []struct {
+		name, row, wantTime string
+	}{
+		{"no_interaction", `{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`, ""},
+		{"worked", completedMessage("2026-09-03T12:00:00Z", "AgentMessage"), "2026-09-03T12:00:00Z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+				withOrdinal(0, header(testThreadID, "0.117.0", "paginated", `,"parent_thread_id":"`+secondThreadID+`"`)),
+				withOrdinal(1, tc.row),
+			})
+			result := New().List(context.Background(), testSource(home))
+			if len(result.Sources) != 1 || len(result.Sources[0].Relationships) == 0 {
+				t.Fatalf("List() = %#v", result)
+			}
+			got := result.Sources[0].LastInteractionAt
+			if tc.wantTime == "" && (got != nil || !hasOmission(result.Omissions, "source_time_unavailable")) || tc.wantTime != "" && (got == nil || *got != tc.wantTime) {
+				t.Fatalf("List() = %#v", result)
 			}
 		})
 	}

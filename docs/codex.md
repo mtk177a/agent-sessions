@@ -23,7 +23,7 @@ When more than one artifact represents the same thread, the adapter follows Code
 If that ordering cannot distinguish the current artifact, content operations return `unsupported` instead of silently selecting one copy.
 
 Without inherited or sliced history, the list version hint remains a domain-separated hash of the current file size and modification time.\
-With safely resolved inherited history or a subagent history boundary, `content_hash` uses the `v2` Codex hint namespace and hashes the selected header and included byte ranges in logical order; an unresolved lineage has no hint.\
+With safely resolved inherited history or a subagent history boundary, `content_hash` uses the `v3` Codex hint namespace and hashes, in logical order, the selected header plus the header and included byte ranges of each inherited rollout that contributes rows; an unresolved lineage has no hint.\
 Rows before `subagent_history_start_ordinal` belong to the copied parent context and do not affect the child source's hint, events, verification, or interaction time.\
 The hint remains a change signal, not a verified source version.\
 Logical-history verification streams bounded provider content through the common `VerifiedVersion` contract.\
@@ -47,6 +47,7 @@ An unrecognized row, an unsupported history mode, or invalid ordinals leaves the
 
 Interaction-time decoding additionally accepts syntactically valid versions at or after `0.155.0` when every included rollout matches the known `legacy` or native `paginated` structure.\
 This forward-compatible boundary has no version ceiling: future paginated records require contiguous ordinals and every included row must match the known message, tool, response, lifecycle, or bookkeeping shape.\
+Known completed interaction items must retain the required top-level fields and JSON types of the known item structure.\
 Unknown rows or variants, malformed required bookkeeping fields, and future changes that do not preserve those structures leave the source time unavailable.\
 This structural compatibility applies only to `list` and `show`; `events` and `verify` retain the verified version list above.
 

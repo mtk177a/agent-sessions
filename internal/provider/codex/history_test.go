@@ -63,6 +63,47 @@ func TestInheritedHistoryTimeAndHintIgnoreExcludedSuffix(t *testing.T) {
 	}
 }
 
+func TestInheritedHeaderChangesHintAndVerifiedVersion(t *testing.T) {
+	home := t.TempDir()
+	basePath := rolloutPath(home, "sessions", testThreadID)
+	base := []string{
+		withOrdinal(0, header(testThreadID, "0.153.3", "paginated", "")),
+		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+	}
+	writeRollout(t, basePath, base)
+	cutoff := len(base[0]) + 1 + len(base[1]) + 1
+	extra := fmt.Sprintf(`,"history_base":{"thread_id":"%s","end_ordinal_exclusive":2,"end_byte_offset":%d}`, testThreadID, cutoff)
+	writeRollout(t, rolloutPath(home, "sessions", secondThreadID), []string{
+		withOrdinal(2, header(secondThreadID, "0.153.4", "paginated", extra)),
+		withOrdinal(3, completedMessage("2026-09-03T11:00:00Z", "AgentMessage")),
+	})
+	read := func() (string, string) {
+		t.Helper()
+		adapter := New()
+		source := testSource(home)
+		fingerprint := contract.SourceFingerprint(secondThreadID)
+		shown := adapter.Show(context.Background(), source, fingerprint)
+		if shown.Status != contract.StatusComplete || len(shown.Sources) != 1 || shown.Sources[0].VersionHint == nil {
+			t.Fatalf("Show() = %#v", shown)
+		}
+		evidence := adapter.Evidence(context.Background(), source, fingerprint)
+		if evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil {
+			t.Fatalf("Evidence() = %#v", evidence)
+		}
+		return shown.Sources[0].VersionHint.Value, evidence.VerifiedVersion.Value
+	}
+	hint, verified := read()
+	base[0] = withOrdinal(0, header(testThreadID, "0.153.4", "paginated", ""))
+	writeRollout(t, basePath, base)
+	changedHint, changedVerified := read()
+	if changedHint == hint {
+		t.Fatal("inherited header changed without changing version hint")
+	}
+	if changedVerified == verified {
+		t.Fatal("inherited header changed without changing verified version")
+	}
+}
+
 func TestInheritedHistoryReadsVerifiedOlderTimeFormat(t *testing.T) {
 	home := t.TempDir()
 	base := []string{
@@ -168,8 +209,17 @@ func TestRevertedRolloutChainUsesRolloutIDsAndOriginVersions(t *testing.T) {
 	if events := New().Events(context.Background(), source, fingerprint); events.Status != contract.StatusPartial || hasOmission(events.Omissions, "unsupported_format") || len(events.Events) != 1 {
 		t.Fatalf("Events() = %#v", events)
 	}
-	if evidence := New().Evidence(context.Background(), source, fingerprint); evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil {
+	evidence := New().Evidence(context.Background(), source, fingerprint)
+	if evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil {
 		t.Fatalf("Evidence() = %#v", evidence)
+	}
+	hint, verified := shown.Sources[0].VersionHint.Value, evidence.VerifiedVersion.Value
+	middle[0] = withOrdinal(2, header(testThreadID, "0.153.3", "paginated", middleExtra))
+	writeRollout(t, middlePath, middle)
+	shown = New().Show(context.Background(), source, fingerprint)
+	evidence = New().Evidence(context.Background(), source, fingerprint)
+	if shown.Sources[0].VersionHint == nil || shown.Sources[0].VersionHint.Value == hint || evidence.VerifiedVersion == nil || evidence.VerifiedVersion.Value == verified {
+		t.Fatalf("middle header change was not detected: show=%#v evidence=%#v", shown, evidence)
 	}
 }
 
@@ -342,14 +392,23 @@ func TestExcludedUnsupportedParentDoesNotPoisonSubagent(t *testing.T) {
 	source := testSource(home)
 	fingerprint := contract.SourceFingerprint(secondThreadID)
 	shown := adapter.Show(context.Background(), source, fingerprint)
-	if shown.Status != contract.StatusComplete || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T12:00:00Z" {
+	if shown.Status != contract.StatusComplete || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T12:00:00Z" || shown.Sources[0].VersionHint == nil {
 		t.Fatalf("Show() = %#v", shown)
 	}
 	if events := adapter.Events(context.Background(), source, fingerprint); events.Status != contract.StatusComplete || len(events.Events) != 1 {
 		t.Fatalf("Events() = %#v", events)
 	}
-	if evidence := adapter.Evidence(context.Background(), source, fingerprint); evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil {
+	evidence := adapter.Evidence(context.Background(), source, fingerprint)
+	if evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil {
 		t.Fatalf("Evidence() = %#v", evidence)
+	}
+	hint, verified := shown.Sources[0].VersionHint.Value, evidence.VerifiedVersion.Value
+	base[0] = withOrdinal(0, header(testThreadID, "8.8.8", "paginated", ""))
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), base)
+	shown = adapter.Show(context.Background(), source, fingerprint)
+	evidence = adapter.Evidence(context.Background(), source, fingerprint)
+	if shown.Sources[0].VersionHint == nil || shown.Sources[0].VersionHint.Value != hint || evidence.VerifiedVersion == nil || evidence.VerifiedVersion.Value != verified {
+		t.Fatalf("excluded parent header changed child identity: show=%#v evidence=%#v", shown, evidence)
 	}
 }
 

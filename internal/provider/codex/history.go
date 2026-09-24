@@ -30,14 +30,14 @@ type historySpan struct {
 
 type historyRange struct {
 	item  artifact
+	kind  string
 	start uint64
 	end   uint64
 }
 
 type historyPlan struct {
 	spans         []historySpan
-	header        historyRange
-	ranges        []historyRange
+	parts         []historyRange
 	logical       bool
 	hint          string
 	malformedRows int
@@ -102,7 +102,7 @@ func walkHistory(root string, spans []historySpan, maxBytes, maxRowBytes int64, 
 	plan := historyPlan{spans: spans, logical: logical}
 	h := sha256.New()
 	if logical {
-		_, _ = h.Write([]byte("agent-sessions:codex-version-hint:v2\x00"))
+		_, _ = h.Write([]byte("agent-sessions:codex-version-hint:v3\x00"))
 	}
 	var nextOrdinal uint64
 	for i, span := range spans {
@@ -146,6 +146,9 @@ func scanHistorySpan(root string, span historySpan, maxRowBytes int64, requireOr
 	limited := &io.LimitedReader{R: file, N: int64(span.end)}
 	reader := bufio.NewReaderSize(limited, 64<<10)
 	first := true
+	headerIncluded := false
+	var header historyRange
+	var headerRaw []byte
 	var offset uint64
 	for limited.N > 0 || reader.Buffered() > 0 {
 		raw, oversized, readErr := readBoundedJSONLRow(reader, maxRowBytes)
@@ -184,6 +187,8 @@ func scanHistorySpan(root string, span historySpan, maxRowBytes int64, requireOr
 			if err != nil || !strings.EqualFold(meta.ID, span.item.threadID) || !reflect.DeepEqual(meta, span.item.meta) {
 				return errors.New("rollout header changed after discovery")
 			}
+			header = historyRange{item: span.item, kind: "header", start: start, end: end}
+			headerRaw = raw
 			first = false
 		}
 		if requireOrdinals {
@@ -199,12 +204,14 @@ func scanHistorySpan(root string, span historySpan, maxRowBytes int64, requireOr
 			included = included && line.Ordinal != nil && *line.Ordinal >= *boundary
 		}
 		if selectedHeader {
-			plan.header = historyRange{item: span.item, start: start, end: end}
 			if plan.logical {
-				writeHintPart(hint, "header", raw)
+				includeHistoryHeader(plan, &headerIncluded, header, hint, headerRaw)
 			}
 			visit(span.item, line)
 		} else if included {
+			if plan.logical {
+				includeHistoryHeader(plan, &headerIncluded, header, hint, headerRaw)
+			}
 			appendHistoryRange(plan, span.item, start, end)
 			if plan.logical {
 				writeHintPart(hint, "row", raw)
@@ -257,14 +264,23 @@ func readBoundedJSONLRow(reader *bufio.Reader, maxBytes int64) ([]byte, bool, er
 }
 
 func appendHistoryRange(plan *historyPlan, item artifact, start, end uint64) {
-	if len(plan.ranges) > 0 {
-		last := &plan.ranges[len(plan.ranges)-1]
-		if last.item.relative == item.relative && last.end == start {
+	if len(plan.parts) > 0 {
+		last := &plan.parts[len(plan.parts)-1]
+		if last.kind == "history" && last.item.relative == item.relative && last.end == start {
 			last.end = end
 			return
 		}
 	}
-	plan.ranges = append(plan.ranges, historyRange{item: item, start: start, end: end})
+	plan.parts = append(plan.parts, historyRange{item: item, kind: "history", start: start, end: end})
+}
+
+func includeHistoryHeader(plan *historyPlan, included *bool, header historyRange, hint io.Writer, raw []byte) {
+	if *included {
+		return
+	}
+	plan.parts = append(plan.parts, header)
+	writeHintPart(hint, "header", raw)
+	*included = true
 }
 
 func writeHintPart(w io.Writer, kind string, raw []byte) {

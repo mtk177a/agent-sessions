@@ -78,12 +78,13 @@ func TestFutureCodexVersionUsesStructurallyCompatibleTimeProfile(t *testing.T) {
 		withOrdinal(0, header(testThreadID, "0.155.1", "paginated", "")),
 		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
 		withOrdinal(2, completedMessage("2026-09-03T11:00:00Z", "AgentMessage")),
+		withOrdinal(3, `{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"fictional-command","command":[],"cwd":"file:///fictional","parsed_cmd":[],"source":"agent","status":"completed"}}}`),
 	})
 	adapter := New()
 	source := testSource(home)
 	fingerprint := contract.SourceFingerprint(testThreadID)
 	shown := adapter.Show(context.Background(), source, fingerprint)
-	if shown.Status != contract.StatusComplete || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T11:00:00Z" || hasOmission(shown.Omissions, "unsupported_format") {
+	if shown.Status != contract.StatusComplete || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T12:00:00Z" || hasOmission(shown.Omissions, "unsupported_format") {
 		t.Fatalf("Show() = %#v", shown)
 	}
 	if events := adapter.Events(context.Background(), source, fingerprint); !hasOmission(events.Omissions, "unsupported_format") {
@@ -91,6 +92,29 @@ func TestFutureCodexVersionUsesStructurallyCompatibleTimeProfile(t *testing.T) {
 	}
 	if evidence := adapter.Evidence(context.Background(), source, fingerprint); !hasOmission(evidence.Omissions, "unknown_format") {
 		t.Fatalf("Evidence() = %#v", evidence)
+	}
+}
+
+func TestFutureCodexVersionRejectsIncompleteInteractionItems(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		item string
+	}{
+		{name: "message", item: `{"type":"UserMessage"}`},
+		{name: "tool", item: `{"type":"CommandExecution","id":"fictional-command"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+				withOrdinal(0, header(testThreadID, "0.155.1", "paginated", "")),
+				withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+				withOrdinal(2, `{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":`+tc.item+`}}`),
+			})
+			shown := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+			if shown.Status != contract.StatusPartial || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt != nil || !hasOmission(shown.Omissions, "source_time_unavailable") {
+				t.Fatalf("Show() = %#v", shown)
+			}
+		})
 	}
 }
 

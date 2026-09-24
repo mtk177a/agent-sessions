@@ -33,7 +33,10 @@ func validRowForProfile(profile storageProfile, version string, line rolloutLine
 			var item struct {
 				Type string `json:"type"`
 			}
-			return json.Unmarshal(event.Item, &item) == nil && knownTurnItemType(item.Type)
+			if json.Unmarshal(event.Item, &item) != nil || !knownTurnItemType(item.Type) {
+				return false
+			}
+			return !forward || validForwardCompletedItem(event.Item, item.Type)
 		}
 	}
 	if line.Type == "response_item" {
@@ -43,6 +46,42 @@ func validRowForProfile(profile storageProfile, version string, line rolloutLine
 		return json.Unmarshal(line.Payload, &response) == nil && knownResponseType(response.Type)
 	}
 	return true
+}
+
+func validForwardCompletedItem(raw json.RawMessage, itemType string) bool {
+	fields, ok := jsonObjectFields(raw)
+	if !ok {
+		return false
+	}
+	required := func(names ...string) bool { return hasRequiredFields(fields, names...) }
+	id := func() bool { return required("id") && jsonNonEmptyString(fields["id"]) }
+	switch itemType {
+	case "UserMessage", "AgentMessage":
+		return id() && required("content") && jsonArray(fields["content"])
+	case "FunctionCallOutput":
+		return id() && required("name", "output") && jsonString(fields["name"]) && jsonStringOrArray(fields["output"])
+	case "CommandExecution":
+		return id() && required("command", "cwd", "parsed_cmd", "source", "status") &&
+			jsonArray(fields["command"]) && jsonString(fields["cwd"]) && jsonArray(fields["parsed_cmd"]) &&
+			jsonStringIn(fields["source"], "agent", "user_shell", "unified_exec_startup", "unified_exec_interaction") &&
+			jsonStringIn(fields["status"], "in_progress", "completed", "failed", "declined")
+	case "DynamicToolCall":
+		return id() && required("tool", "arguments", "status") && jsonString(fields["tool"]) &&
+			jsonStringIn(fields["status"], "in_progress", "completed", "failed")
+	case "CollabAgentToolCall":
+		return id() && required("tool", "status", "sender_thread_id") &&
+			jsonStringIn(fields["tool"], "spawn_agent", "send_input", "resume_agent", "wait", "close_agent", "send_message", "followup_task", "interrupt_agent", "list_agents") &&
+			jsonStringIn(fields["status"], "in_progress", "completed", "failed", "interrupted") && jsonString(fields["sender_thread_id"])
+	case "WebSearch":
+		return id() && required("query", "action") && jsonString(fields["query"]) && jsonObjectWithStringField(fields["action"], "type")
+	case "FileChange":
+		return id() && required("changes") && jsonObject(fields["changes"])
+	case "McpToolCall":
+		return id() && required("server", "tool", "arguments", "status") && jsonString(fields["server"]) && jsonString(fields["tool"]) &&
+			jsonStringIn(fields["status"], "inProgress", "completed", "failed")
+	default:
+		return true
+	}
 }
 
 func isForwardBookkeepingType(value string) bool {
@@ -182,6 +221,38 @@ func jsonBool(raw json.RawMessage) bool {
 func jsonNonEmptyString(raw json.RawMessage) bool {
 	var value string
 	return json.Unmarshal(raw, &value) == nil && value != ""
+}
+
+func jsonString(raw json.RawMessage) bool {
+	var value string
+	return json.Unmarshal(raw, &value) == nil
+}
+
+func jsonStringIn(raw json.RawMessage, allowed ...string) bool {
+	var value string
+	if json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func jsonArray(raw json.RawMessage) bool {
+	var value []json.RawMessage
+	return json.Unmarshal(raw, &value) == nil && value != nil
+}
+
+func jsonStringOrArray(raw json.RawMessage) bool {
+	return jsonString(raw) || jsonArray(raw)
+}
+
+func jsonObjectWithStringField(raw json.RawMessage, name string) bool {
+	fields, ok := jsonObjectFields(raw)
+	return ok && hasRequiredFields(fields, name) && jsonString(fields[name])
 }
 
 func jsonObject(raw json.RawMessage) bool {

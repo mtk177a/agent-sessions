@@ -38,12 +38,10 @@ func verifiedArtifact(root string, item artifact) (contract.VerifiedVersionID, e
 }
 
 func verifiedHistory(root string, plan historyPlan) (contract.VerifiedVersionID, error) {
-	ranges := make([]historyRange, 0, 1+len(plan.ranges))
-	if plan.header.end <= plan.header.start {
-		return contract.VerifiedVersionID{}, errors.New("selected rollout header is unavailable")
+	if len(plan.parts) == 0 {
+		return contract.VerifiedVersionID{}, errors.New("logical history evidence is unavailable")
 	}
-	ranges = append(ranges, plan.header)
-	ranges = append(ranges, plan.ranges...)
+	ranges := plan.parts
 	readers := make([]contract.EvidenceReader, 0, len(ranges))
 	opened := make([]openedHistoryRange, 0, len(ranges))
 	defer func() {
@@ -62,11 +60,7 @@ func verifiedHistory(root string, plan historyPlan) (contract.VerifiedVersionID,
 			return contract.VerifiedVersionID{}, errors.New("rollout history changed before verification")
 		}
 		opened = append(opened, openedHistoryRange{file: file, before: before, item: span.item})
-		kind := "history"
-		if i == 0 {
-			kind = "header"
-		}
-		name := fmt.Sprintf("rollout/%03d-%s.jsonl", i, kind)
+		name := fmt.Sprintf("rollout/%03d-%s.jsonl", i, span.kind)
 		readers = append(readers, contract.EvidenceReader{Name: name, Size: span.end - span.start, Reader: io.NewSectionReader(file, int64(span.start), int64(span.end-span.start))})
 	}
 	verified, err := contract.VerifiedVersionReaders(readers, uint64(maxEffectiveHistoryBytes))

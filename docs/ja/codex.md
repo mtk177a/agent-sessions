@@ -37,7 +37,7 @@ Codex は `$CODEX_HOME` をデータディレクトリとして文書化して�
 
 ## バージョン依存のデコード
 
-デコーダーは、`0.92.0` から `0.155.0-alpha.9.2` までに観測した 32 個の版名について、確認済みの履歴方式と構造の組み合わせを受け付ける。\
+イベントのデコードと形式の検証では、`0.92.0` から `0.155.0-alpha.9.2` までに観測した 32 個の版名について、確認済みの履歴方式と構造の組み合わせを受け付ける。\
 従来の境界は、公式の `openai/codex` タグ [`rust-v0.149.1`](https://github.com/openai/codex/tree/rust-v0.149.1) のコミット [`ff29a44391deccde0aba0f8390337d7f3c319ea4`](https://github.com/openai/codex/commit/ff29a44391deccde0aba0f8390337d7f3c319ea4) に対して確認している。\
 `0.153.0` の境界は、公式の [`rust-v0.153.0` の履歴実装](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs) に対して確認した。\
 追加した版は、公式の [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs)、[`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs)、[`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs)、[`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) の項目定義と、保存済みロールアウトの構造に対する上限付き・読み取り専用の調査で確認した。非公開の本文や識別子は、このリポジトリへ複製していない。
@@ -52,6 +52,12 @@ canonicalized legacy paginated 形式は、確認済みの移行後版名 `0.92.
 未知の行、未対応の履歴方式、行番号の不一致があれば、影響する観測を利用可能としない。\
 ヘッダーの版名だけでは対応可否を判断しない。
 `token_usage_record` は管理用の行として扱い、`realtime_item` が現れた場合はやり取りとして正規化できないため、不完全として扱う。
+
+やり取り時刻のデコードでは、構文上有効な `0.155.0` 以降の版も、採用するすべてのロールアウトが既知の `legacy` または native `paginated` 構造に一致する場合に受け付ける。\
+この前方互換の境界に版の上限は設けない。\
+将来版の paginated 記録では行番号の連続性を必須とし、採用するすべての行が、既知のメッセージ、ツール、レスポンス、ライフサイクル、管理用の形式に一致しなければならない。\
+未知の行や種類、必須の管理用フィールドの不正、既知の構造を維持しない将来の変更がある場合は、ソースの時刻を出さない。\
+この構造上の互換性を適用するのは `list` と `show` だけであり、`events` と `verify` は前述の確認済み版一覧を維持する。
 
 アダプターは、公開される観測に必要な `session_meta`、`event_msg`、`response_item` のロールアウト用エンベロープを認識する。\
 旧形式の履歴では、`user_message` と `agent_message` のイベントが正規のメッセージ行であり、レスポンスのツール呼び出しと保存済みの出力行が相関の証拠を提供する。\
@@ -90,7 +96,7 @@ canonicalized legacy paginated 履歴では、完了済みメッセージ項目�
 
 ## 完全性と制限
 
-不明なエンベロープ、不明なイベント種別、既知だが未対応の項目またはメッセージ内容、不正な JSONL、サイズ超過した行、相関情報やツール結果の欠落、重複した呼び出し ID、不正な関係識別子、未検証の CLI バージョンがある場合、`complete` にはできない。\
+不明なエンベロープ、不明なイベント種別、既知だが未対応の項目またはメッセージ内容、不正な JSONL、サイズ超過した行、相関情報やツール結果の欠落、重複した呼び出し ID、不正な関係識別子、対象操作の互換性境界に含まれない版がある場合、`complete` にはできない。\
 有用な観測がある場合は `partial` を返し、認識したソースから安全で有用な結果を得られない場合は `unsupported` を返し、I/O とリソースの失敗は `error` を返す。
 
 圧縮された `.jsonl.zst` ロールアウトは認識するが、実行ファイルに外部圧縮依存がないためデコードしない。\

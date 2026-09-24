@@ -1,5 +1,7 @@
 package codex
 
+import "github.com/mtk177a/agent-sessions/internal/provider"
+
 type storageProfile uint8
 
 const (
@@ -12,6 +14,12 @@ const (
 type versionCompatibility struct {
 	paginated storageProfile
 	legacy    bool
+}
+
+type timeCompatibility struct {
+	profile         storageProfile
+	forward         bool
+	requireOrdinals bool
 }
 
 var codexCompatibility = map[string]versionCompatibility{
@@ -66,7 +74,24 @@ func compatibilityProfile(version, historyMode string) storageProfile {
 }
 
 func supportsInteractionTime(version, historyMode string) bool {
-	return compatibilityProfile(version, historyMode) != profileUnsupported
+	return interactionTimeCompatibility(version, historyMode).profile != profileUnsupported
+}
+
+func interactionTimeCompatibility(version, historyMode string) timeCompatibility {
+	if profile := compatibilityProfile(version, historyMode); profile != profileUnsupported {
+		return timeCompatibility{profile: profile, requireOrdinals: profile == profileCanonicalizedLegacyPaginated}
+	}
+	if !provider.SemverAtLeast(version, "0.155.0") {
+		return timeCompatibility{}
+	}
+	switch historyMode {
+	case "paginated":
+		return timeCompatibility{profile: profileNativePaginated, forward: true, requireOrdinals: true}
+	case "legacy":
+		return timeCompatibility{profile: profileLegacy, forward: true}
+	default:
+		return timeCompatibility{}
+	}
 }
 
 func supportsTokenUsageRecord(value string) bool {

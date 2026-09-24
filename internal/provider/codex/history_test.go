@@ -192,7 +192,7 @@ func TestUnsafeInheritedHistoryOmitsTimeAndHint(t *testing.T) {
 		{name: "duplicate", baseID: testThreadID, ordinal: 2, duplicate: true},
 		{name: "wrong_ordinal", baseID: testThreadID, ordinal: 3},
 		{name: "mid_row_offset", baseID: testThreadID, ordinal: 2, adjustOffset: -1},
-		{name: "unverified_base", baseID: testThreadID, ordinal: 2, baseVersion: "9.9.9"},
+		{name: "unverified_base", baseID: testThreadID, ordinal: 2, baseVersion: "0.151.0"},
 		{name: "unknown_extension", baseID: testThreadID, ordinal: 2, itemKind: "future.tool"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -28,7 +28,7 @@ func readLastInteractionAt(root string, item artifact) (string, bool) {
 				return "", false
 			}
 		}
-		if row.Version != "" && !isSupportedVersion(row.Version) {
+		if row.Version != "" && !supportsInteractionTimeVersion(row.Version) {
 			return "", false
 		}
 		activity, safe := claudeInteractionRow(row)
@@ -67,11 +67,8 @@ func claudeInteractionRow(row transcriptRow) (bool, bool) {
 		if row.Subtype == "turn_duration" || row.Subtype == "compact_boundary" {
 			return false, true
 		}
-		return false, row.Version == "2.1.177" && (row.Subtype == "away_summary" || row.Subtype == "informational")
+		return false, row.Subtype == "away_summary" || row.Subtype == "informational"
 	case "attachment":
-		if row.Version != "2.1.177" {
-			return false, false
-		}
 		var attachment struct {
 			Type string `json:"type"`
 		}

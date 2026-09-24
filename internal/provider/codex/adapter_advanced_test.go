@@ -281,7 +281,7 @@ func TestAmbiguousActiveAndArchivedArtifactsAreNotSilentlySelected(t *testing.T)
 
 func TestUnsupportedVersionAndMalformedHeaderDegradeDiscovery(t *testing.T) {
 	home := t.TempDir()
-	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "9.9.9", "legacy", "")})
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{header(testThreadID, "0.151.0", "legacy", "")})
 	malformed := rolloutPath(home, "archived_sessions", secondThreadID)
 	writeRollout(t, malformed, []string{`{"type":"future_header","payload":{}}`})
 	listed := New().List(context.Background(), testSource(home))

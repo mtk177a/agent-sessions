@@ -2,10 +2,10 @@ package codex
 
 import "encoding/json"
 
-// validRowForProfile owns the verified row vocabulary and shape checks for a
+// validRowForProfile owns the known row vocabulary and shape checks for a
 // stored Codex format. Consumers still decide how a valid row affects their
 // operation.
-func validRowForProfile(profile storageProfile, version string, line rolloutLine) bool {
+func validRowForProfile(profile storageProfile, version string, line rolloutLine, forward bool) bool {
 	if profile == profileUnsupported {
 		return false
 	}
@@ -13,9 +13,12 @@ func validRowForProfile(profile storageProfile, version string, line rolloutLine
 		return validCanonicalizedLegacyRow(version, line)
 	}
 	if line.Type == "token_usage_record" {
-		return supportsTokenUsageRecord(version)
+		return forward && validForwardBookkeepingRow(line) || !forward && supportsTokenUsageRecord(version)
 	}
 	if !knownTopLevel(line.Type) {
+		return false
+	}
+	if forward && isForwardBookkeepingType(line.Type) && !validForwardBookkeepingRow(line) {
 		return false
 	}
 	if line.Type == "event_msg" {
@@ -40,6 +43,42 @@ func validRowForProfile(profile storageProfile, version string, line rolloutLine
 		return json.Unmarshal(line.Payload, &response) == nil && knownResponseType(response.Type)
 	}
 	return true
+}
+
+func isForwardBookkeepingType(value string) bool {
+	switch value {
+	case "session_meta", "turn_context", "compacted", "world_state", "inter_agent_communication_metadata", "security_risk_score":
+		return true
+	default:
+		return false
+	}
+}
+
+func validForwardBookkeepingRow(line rolloutLine) bool {
+	fields, ok := jsonObjectFields(line.Payload)
+	if !ok {
+		return false
+	}
+	switch line.Type {
+	case "session_meta", "turn_context", "compacted", "security_risk_score":
+		return true
+	case "world_state":
+		return hasRequiredFields(fields, "full", "state") && jsonBool(fields["full"]) && jsonObject(fields["state"])
+	case "inter_agent_communication_metadata":
+		return hasRequiredFields(fields, "trigger_turn") && jsonBool(fields["trigger_turn"])
+	case "token_usage_record":
+		if !hasRequiredFields(fields, "thread_id", "turn_id", "session_id", "root_turn_id", "response_id", "usage", "turn_token_usage", "thread_token_usage") {
+			return false
+		}
+		for _, name := range []string{"thread_id", "turn_id", "session_id", "root_turn_id", "response_id"} {
+			if !jsonNonEmptyString(fields[name]) {
+				return false
+			}
+		}
+		return jsonObject(fields["usage"]) && jsonObject(fields["turn_token_usage"]) && jsonObject(fields["thread_token_usage"])
+	default:
+		return false
+	}
 }
 
 // Canonicalized rollouts retain their old CLI version after Codex rewrites
@@ -118,6 +157,15 @@ func hasExactFields(fields map[string]json.RawMessage, names ...string) bool {
 	if len(fields) != len(names) {
 		return false
 	}
+	for _, name := range names {
+		if _, ok := fields[name]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func hasRequiredFields(fields map[string]json.RawMessage, names ...string) bool {
 	for _, name := range names {
 		if _, ok := fields[name]; !ok {
 			return false

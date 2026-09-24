@@ -236,7 +236,7 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 	formatOmissions := []contract.Omission{}
 	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode) == profileCanonicalizedLegacyPaginated, func(origin artifact, line rolloutLine) {
 		profile := compatibilityProfile(origin.meta.CLIVersion, origin.meta.HistoryMode)
-		if profile == profileUnsupported || !validRowForProfile(profile, origin.meta.CLIVersion, line) {
+		if profile == profileUnsupported || !validRowForProfile(profile, origin.meta.CLIVersion, line, false) {
 			formatOmissions = append(formatOmissions, omission("unknown_format", "verification", "A Codex row was not recognized for its stored format."))
 		}
 	})

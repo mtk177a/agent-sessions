@@ -31,7 +31,7 @@ An unsliced rollout retains the path-free evidence name `rollout/primary.jsonl`;
 
 ## Version-sensitive decoding
 
-The decoder accepts the verified mode and structure combinations for the 32 observed version labels from `0.92.0` through `0.155.0-alpha.9.2`.\
+Event decoding and format verification accept the verified mode and structure combinations for the 32 observed version labels from `0.92.0` through `0.155.0-alpha.9.2`.\
 The older boundary was checked against the official `openai/codex` tag [`rust-v0.149.1`](https://github.com/openai/codex/tree/rust-v0.149.1) at commit [`ff29a44391deccde0aba0f8390337d7f3c319ea4`](https://github.com/openai/codex/commit/ff29a44391deccde0aba0f8390337d7f3c319ea4).\
 The `0.153.0` boundary was checked against the official [`rust-v0.153.0` history implementation](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs); its `token_usage_record` is bookkeeping, while an encountered `realtime_item` remains incomplete because its interaction meaning is not normalized.
 The additional versions were checked against their official [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs), [`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs), [`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs), and [`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) item definitions and against bounded, read-only structural inspection of saved rollouts; no private contents or identifiers were copied into this repository.
@@ -44,6 +44,11 @@ Codex's [legacy-to-paginated migration](https://github.com/openai/codex/blob/941
 The canonicalized legacy paginated profile covers the verified migrated labels `0.92.0`, `0.94.0`, `0.94.0-alpha.10`, `0.95.0-alpha.3`, `0.98.0`, `0.99.0-alpha.5`, `0.101.0`, `0.117.0`, `0.118.0`, `0.139.0`, `0.142.5`, and `0.144.2`.\
 It requires contiguous ordinals and the verified migrated row vocabulary.\
 An unrecognized row, an unsupported history mode, or invalid ordinals leaves the affected observation unavailable; the header version alone does not establish compatibility.
+
+Interaction-time decoding additionally accepts syntactically valid versions at or after `0.155.0` when every included rollout matches the known `legacy` or native `paginated` structure.\
+This forward-compatible boundary has no version ceiling: future paginated records require contiguous ordinals and every included row must match the known message, tool, response, lifecycle, or bookkeeping shape.\
+Unknown rows or variants, malformed required bookkeeping fields, and future changes that do not preserve those structures leave the source time unavailable.\
+This structural compatibility applies only to `list` and `show`; `events` and `verify` retain the verified version list above.
 
 The adapter recognizes the `session_meta`, `event_msg`, and `response_item` rollout envelopes needed for the public observations.\
 For legacy history, `user_message` and `agent_message` events are the canonical message rows, while response tool calls and their persisted output rows provide correlation evidence.\
@@ -79,7 +84,7 @@ Missing or invalid timestamps, uncertain rows, unresolved history, and input lim
 
 ## Completeness and limitations
 
-Unknown envelopes, unknown event variants, unsupported known items or message content, malformed JSONL, oversized rows, omitted correlations or tool results, duplicate call identifiers, invalid relationship identifiers, and unverified CLI versions prevent `complete`.\
+Unknown envelopes, unknown event variants, unsupported known items or message content, malformed JSONL, oversized rows, omitted correlations or tool results, duplicate call identifiers, invalid relationship identifiers, and versions outside the relevant operation's compatibility boundary prevent `complete`.\
 Useful observations return `partial`; a recognized source that cannot yield a safe useful result returns `unsupported`; I/O and resource failures return `error`.
 
 Compressed `.jsonl.zst` rollouts are recognized but not decoded because the executable has no external compression dependency.\

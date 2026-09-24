@@ -27,8 +27,8 @@ Verification hashes the bounded main transcript through the common `VerifiedVers
 
 ## Version-sensitive decoding
 
-The decoder is scoped to verified internal transcript JSONL structures for Claude Code `2.1.177`, `2.1.228`, and `2.1.260`.\
-Claude Code documents the transcript location but states that each line's internal shape can change between releases, so a different row version prevents `complete` rather than being accepted speculatively.
+Event decoding and format verification are scoped to verified internal transcript JSONL structures for Claude Code `2.1.177`, `2.1.228`, and `2.1.260`.\
+Claude Code documents the transcript location but states that each line's internal shape can change between releases, so other versions remain incomplete for `events` and `verify` rather than being accepted speculatively.
 
 Compatibility for `2.1.228` was checked against its official Claude Code distribution and the documented transcript, hook, status-line, and subagent location contracts.\
 Compatibility for `2.1.177` was checked read-only against private provider-owned records and is covered by independently constructed synthetic fixtures.\
@@ -44,10 +44,12 @@ Known bookkeeping rows are not public observations and are ignored.\
 Unknown rows, unknown content blocks, attachments, reasoning blocks, internal user metadata, and unsupported system observations are reported as omissions.
 
 The latest timestamp of supported user and assistant message or tool rows becomes `last_interaction_at`.\
-For `2.1.177`, the observed `agent_listing_delta`, `command_permissions`, `deferred_tools_delta`, `diagnostics`, `edited_text_file`, `opened_file_in_ide`, `plan_mode`, `plan_mode_exit`, `selected_lines_in_ide`, `skill_listing`, and `task_reminder` attachments, and `away_summary` and `informational` system rows, are non-interaction observations and do not advance it.\
+For interaction time, syntactically valid versions at or after `2.1.260` are also accepted when every row retains a known structure; this forward-compatible boundary has no version ceiling.\
+The observed `agent_listing_delta`, `command_permissions`, `deferred_tools_delta`, `diagnostics`, `edited_text_file`, `opened_file_in_ide`, `plan_mode`, `plan_mode_exit`, `selected_lines_in_ide`, `skill_listing`, and `task_reminder` attachments, and `away_summary` and `informational` system rows, are structurally recognized non-interaction observations and do not advance it.\
 Other attachments, including a possible queued command, remain uncertain and prevent a source time.\
 Bookkeeping, supported non-interaction system rows, and provider API errors do not advance it.\
-Missing or invalid timestamps, unknown potentially interactive rows or blocks, and ambiguous transcripts prevent a source time.
+Missing or invalid timestamps, unknown potentially interactive rows or blocks, malformed or older unverified versions, and ambiguous transcripts prevent a source time.\
+Forward-compatible interaction-time decoding does not expand the versions considered verified for `events` or `verify`.
 
 Tool call identifiers are deterministic adapter-owned hashes of the session identity and provider correlation identifier.\
 Results are related to calls only through the explicit `tool_use_id` value.

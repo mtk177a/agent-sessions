@@ -115,7 +115,7 @@ Consumers may use a recognized hint for change detection and must ignore an unre
 
 `last_interaction_at`, when present, is a canonical UTC RFC 3339 timestamp ending in `Z`.\
 It is the latest recorded user or assistant message, tool call, or tool result time in the logical source; management rows, system notifications, and file modification times are excluded.\
-It is absent if no interaction exists or the maximum cannot be established safely, including missing or malformed activity timestamps, unknown potentially interactive rows, unverified versions, ambiguous artifacts, and unresolved inherited history.\
+It is absent if no interaction exists or the maximum cannot be established safely, including missing or malformed activity timestamps, unknown potentially interactive rows, versions outside the provider's interaction-time compatibility boundary, ambiguous artifacts, and unresolved inherited history.\
 Such absence adds `source_time_unavailable` with `scope: source` and makes `list` or `show` partial; `count` may aggregate affected sources.\
 For ChatGPT Data Export, the selected active branch defines the interactions considered; other branches do not advance this field.
 

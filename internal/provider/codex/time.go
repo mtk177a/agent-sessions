@@ -18,7 +18,7 @@ func readLastInteractionAt(root string, item artifact, byRollout map[string][]ar
 	safeTime := true
 	requireOrdinals := false
 	for _, span := range spans {
-		requireOrdinals = requireOrdinals || compatibilityProfile(span.item.meta.CLIVersion, span.item.meta.HistoryMode) == profileCanonicalizedLegacyPaginated
+		requireOrdinals = requireOrdinals || interactionTimeCompatibility(span.item.meta.CLIVersion, span.item.meta.HistoryMode).requireOrdinals
 	}
 	plan, err := walkHistory(root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, requireOrdinals, func(origin artifact, line rolloutLine) {
 		if !supportsInteractionTime(origin.meta.CLIVersion, origin.meta.HistoryMode) {
@@ -59,8 +59,9 @@ func readLastInteractionAt(root string, item artifact, byRollout map[string][]ar
 }
 
 func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, bool) {
-	profile := compatibilityProfile(version, historyMode)
-	if !validRowForProfile(profile, version, line) {
+	compatibility := interactionTimeCompatibility(version, historyMode)
+	profile := compatibility.profile
+	if !validRowForProfile(profile, version, line, compatibility.forward) {
 		return false, false
 	}
 	switch line.Type {

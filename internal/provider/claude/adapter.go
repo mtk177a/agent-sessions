@@ -128,11 +128,11 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 		if len(candidates) > 1 {
 			omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple Claude transcripts have the same provider-native session identity."))
 		}
-		if !isSupportedVersion(candidates[0].version) {
-			omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version has not been verified for this adapter."))
+		if !supportsInteractionTimeVersion(candidates[0].version) {
+			omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version is outside the interaction-time compatibility boundary."))
 		}
 		itemSource := makeSource(source, candidates)
-		if len(candidates) == 1 && isSupportedVersion(candidates[0].version) {
+		if len(candidates) == 1 && supportsInteractionTimeVersion(candidates[0].version) {
 			if value, ok := readLastInteractionAt(source.Root, candidates[0]); ok {
 				itemSource.LastInteractionAt = &value
 			}
@@ -166,11 +166,11 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 	if len(candidates) > 1 {
 		omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple Claude transcripts have the same provider-native session identity."))
 	}
-	if !isSupportedVersion(candidates[0].version) {
-		omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version has not been verified for this adapter."))
+	if !supportsInteractionTimeVersion(candidates[0].version) {
+		omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version is outside the interaction-time compatibility boundary."))
 	}
 	itemSource := makeSource(source, candidates)
-	if len(candidates) == 1 && isSupportedVersion(candidates[0].version) {
+	if len(candidates) == 1 && supportsInteractionTimeVersion(candidates[0].version) {
 		if value, ok := readLastInteractionAt(source.Root, candidates[0]); ok {
 			itemSource.LastInteractionAt = &value
 		}
@@ -237,7 +237,7 @@ func (a *Adapter) find(source config.Source, fingerprint string) (artifact, []co
 	if len(candidates) != 1 {
 		return artifact{}, omissions, errAmbiguousArtifact
 	}
-	if !isSupportedVersion(candidates[0].version) {
+	if !isVerifiedVersion(candidates[0].version) {
 		omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version has not been verified for this adapter."))
 	}
 	return candidates[0], omissions, nil
@@ -350,13 +350,17 @@ func sortedEntryKeys(entries map[string]safeio.FileEntry) []string {
 	return keys
 }
 
-func isSupportedVersion(version string) bool {
+func isVerifiedVersion(version string) bool {
 	switch version {
 	case "2.1.177", "2.1.228", "2.1.260":
 		return true
 	default:
 		return false
 	}
+}
+
+func supportsInteractionTimeVersion(version string) bool {
+	return isVerifiedVersion(version) || provider.SemverAtLeast(version, "2.1.260")
 }
 
 var errResourceLimit = errors.New("resource limit")
@@ -483,7 +487,7 @@ func normalizeRows(sessionID string, data []byte) ([]contract.Event, []contract.
 					omissions = append(omissions, omission("malformed_record", "events", "A Claude bookkeeping row had an invalid or mismatched session identity."))
 				}
 			}
-			if row.Version != "" && !isSupportedVersion(row.Version) {
+			if row.Version != "" && !isVerifiedVersion(row.Version) {
 				omissions = append(omissions, omission("unsupported_format", "events", "A Claude bookkeeping row version has not been verified for this adapter."))
 			}
 			continue
@@ -497,7 +501,7 @@ func normalizeRows(sessionID string, data []byte) ([]contract.Event, []contract.
 			omissions = append(omissions, omission("malformed_record", "events", "A Claude row had an invalid or mismatched session identity."))
 			continue
 		}
-		if !isSupportedVersion(row.Version) {
+		if !isVerifiedVersion(row.Version) {
 			omissions = append(omissions, omission("unsupported_format", "events", "A Claude row version has not been verified for this adapter."))
 			continue
 		}

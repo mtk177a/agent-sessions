@@ -59,7 +59,7 @@ func TestInteractionTimeIsUnavailableForUnsafeClaudeRows(t *testing.T) {
 		{"invalid_timestamp", timedRow("2.1.260", "invalid", "assistant", `{"role":"assistant","content":[{"type":"text","text":"later"}]}`, "")},
 		{"unknown_row", `{"timestamp":"2026-09-04T00:00:00Z","type":"future_row","sessionId":"` + testSessionID + `","version":"2.1.260"}`},
 		{"unknown_block", timedRow("2.1.260", "2026-09-04T00:00:00Z", "assistant", `{"role":"assistant","content":[{"type":"future_block"}]}`, "")},
-		{"unknown_version", timedRow("9.9.9", "2026-09-04T00:00:00Z", "assistant", `{"role":"assistant","content":[{"type":"text","text":"later"}]}`, "")},
+		{"older_unverified_version", timedRow("2.1.259", "2026-09-04T00:00:00Z", "assistant", `{"role":"assistant","content":[{"type":"text","text":"later"}]}`, "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -91,13 +91,45 @@ func TestInteractionTimeIgnoresObservedNonInteractiveAttachments(t *testing.T) {
 }
 
 func TestInteractionTimeRemainsUnknownForCommandAttachment(t *testing.T) {
-	home := t.TempDir()
-	writeTranscript(t, home, "fictional-project", testSessionID, []string{
-		timedRow("2.1.177", "2026-09-03T10:00:00Z", "user", `{"role":"user","content":"hello"}`, ""),
-		`{"timestamp":"2026-09-03T12:00:00Z","type":"attachment","sessionId":"` + testSessionID + `","version":"2.1.177","attachment":{"type":"queued_command","prompt":"fictional task"}}`,
-	})
-	listed := New().List(context.Background(), testSource(home))
-	if len(listed.Sources) != 1 || listed.Sources[0].LastInteractionAt != nil {
-		t.Fatalf("List() = %#v", listed)
+	for _, version := range []string{"2.1.177", "2.1.270", "9.0.0"} {
+		t.Run(version, func(t *testing.T) {
+			home := t.TempDir()
+			writeTranscript(t, home, "fictional-project", testSessionID, []string{
+				timedRow(version, "2026-09-03T10:00:00Z", "user", `{"role":"user","content":"hello"}`, ""),
+				`{"timestamp":"2026-09-03T12:00:00Z","type":"attachment","sessionId":"` + testSessionID + `","version":"` + version + `","attachment":{"type":"queued_command","prompt":"fictional task"}}`,
+			})
+			listed := New().List(context.Background(), testSource(home))
+			if len(listed.Sources) != 1 || listed.Sources[0].LastInteractionAt != nil || !hasOmission(listed.Omissions, "source_time_unavailable") {
+				t.Fatalf("List() = %#v", listed)
+			}
+		})
+	}
+}
+
+func TestFutureClaudeVersionUsesStructurallyCompatibleTimeProfile(t *testing.T) {
+	for _, version := range []string{"2.1.270", "9.0.0"} {
+		t.Run(version, func(t *testing.T) {
+			home := t.TempDir()
+			writeTranscript(t, home, "fictional-project", testSessionID, []string{
+				timedRow("2.1.177", "2026-09-03T09:00:00Z", "user", `{"role":"user","content":"earlier"}`, ""),
+				timedRow(version, "2026-09-03T10:00:00Z", "user", `{"role":"user","content":"hello"}`, ""),
+				timedRow(version, "2026-09-03T11:00:00Z", "assistant", `{"role":"assistant","content":[{"type":"text","text":"hi"}]}`, ""),
+				`{"timestamp":"2026-09-03T12:00:00Z","type":"attachment","sessionId":"` + testSessionID + `","version":"` + version + `","attachment":{"type":"task_reminder"}}`,
+				`{"timestamp":"2026-09-03T13:00:00Z","type":"system","sessionId":"` + testSessionID + `","version":"` + version + `","subtype":"informational","content":"fictional notice"}`,
+			})
+			adapter := New()
+			source := testSource(home)
+			listed := adapter.List(context.Background(), source)
+			if listed.Status != contract.StatusComplete || len(listed.Sources) != 1 || listed.Sources[0].LastInteractionAt == nil || *listed.Sources[0].LastInteractionAt != "2026-09-03T11:00:00Z" || hasOmission(listed.Omissions, "unsupported_format") {
+				t.Fatalf("List() = %#v", listed)
+			}
+			fingerprint := listed.Sources[0].Identity.ProviderSourceFingerprint
+			if events := adapter.Events(context.Background(), source, fingerprint); !hasOmission(events.Omissions, "unsupported_format") {
+				t.Fatalf("Events() = %#v", events)
+			}
+			if evidence := adapter.Evidence(context.Background(), source, fingerprint); !hasOmission(evidence.Omissions, "unsupported_format") {
+				t.Fatalf("Evidence() = %#v", evidence)
+			}
+		})
 	}
 }

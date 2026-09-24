@@ -24,7 +24,7 @@ func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
 		n.omissions = append(n.omissions, omission("unsupported_format", "events", "The Codex artifact version and history mode have not been verified."))
 		return
 	}
-	if !validRowForProfile(profile, origin.meta.CLIVersion, line) {
+	if !validRowForProfile(profile, origin.meta.CLIVersion, line, false) {
 		n.omissions = append(n.omissions, omission("unknown_format", "events", "A Codex JSONL row or payload type was not recognized for its stored format."))
 		return
 	}

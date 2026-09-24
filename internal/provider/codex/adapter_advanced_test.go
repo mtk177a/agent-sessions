@@ -311,13 +311,13 @@ func TestMalformedOnlyDiscoveryIsUnsupported(t *testing.T) {
 	}
 }
 
-func TestOversizedRowDegradesEventsAndOversizedArtifactFails(t *testing.T) {
+func TestOversizedRowDegradesEventsAndLargeArtifactStreamsVerification(t *testing.T) {
 	home := t.TempDir()
 	path := rolloutPath(home, "sessions", testThreadID)
 	writeRollout(t, path, []string{
 		header(testThreadID, "0.149.1", "legacy", ""),
 		`{"type":"event_msg","payload":{"type":"user_message","message":"usable"}}`,
-		`{"type":"future","payload":{"value":"` + strings.Repeat("x", maxRowBytes) + `"}}`,
+		`{"type":"future","payload":{"value":"` + strings.Repeat("x", maxTimeRowBytes) + `"}}`,
 	})
 	result := eventsForOnlySource(t, home)
 	if result.Status != contract.StatusPartial || len(result.Events) != 1 || !hasOmission(result.Omissions, "resource_limit") {
@@ -328,7 +328,7 @@ func TestOversizedRowDegradesEventsAndOversizedArtifactFails(t *testing.T) {
 	}
 	listed := New().List(context.Background(), testSource(home))
 	evidence := New().Evidence(context.Background(), testSource(home), listed.Sources[0].Identity.ProviderSourceFingerprint)
-	if evidence.Err == nil {
+	if evidence.Err != nil || evidence.Status != contract.StatusPartial || evidence.VerifiedVersion == nil {
 		t.Fatalf("Evidence() = %#v", evidence)
 	}
 }
@@ -347,12 +347,12 @@ func TestAdapterRejectsProviderRootEscape(t *testing.T) {
 }
 
 func TestEventLimitProducesPartialResult(t *testing.T) {
-	var data bytes.Buffer
-	data.WriteString(header(testThreadID, "0.149.1", "legacy", "") + "\n")
+	normalizer := newEventNormalizer(testThreadID)
+	origin := artifact{threadID: testThreadID, meta: sessionMeta{CLIVersion: "0.149.1", HistoryMode: "legacy"}}
 	for i := 0; i <= maxNormalizedEvents; i++ {
-		data.WriteString(`{"type":"event_msg","payload":{"type":"user_message","message":"x"}}` + "\n")
+		normalizer.consume(origin, rolloutLine{Type: "event_msg", Payload: json.RawMessage(`{"type":"user_message","message":"x"}`)})
 	}
-	events, omissions := normalizeRows(testThreadID, "legacy", data.Bytes())
+	events, omissions := normalizer.finish()
 	if len(events) != maxNormalizedEvents || !hasOmission(omissions, "resource_limit") {
 		t.Fatalf("events = %d, omissions = %#v", len(events), omissions)
 	}

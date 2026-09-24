@@ -65,6 +65,24 @@ func TestVerifiedVersionReaderMatchesChunkEncoding(t *testing.T) {
 	}
 }
 
+func TestVerifiedVersionReadersMatchesChunkEncoding(t *testing.T) {
+	chunks := []EvidenceChunk{{Name: "rollout/000-header.jsonl", Content: []byte("header\n")}, {Name: "rollout/001-history.jsonl", Content: []byte("row\n")}}
+	want, err := VerifiedVersion(chunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := VerifiedVersionReaders([]EvidenceReader{
+		{Name: chunks[0].Name, Size: uint64(len(chunks[0].Content)), Reader: bytes.NewReader(chunks[0].Content)},
+		{Name: chunks[1].Name, Size: uint64(len(chunks[1].Content)), Reader: bytes.NewReader(chunks[1].Content)},
+	}, 32)
+	if err != nil || got != want {
+		t.Fatalf("VerifiedVersionReaders() = %#v, %v; want %#v", got, err, want)
+	}
+	if _, err := VerifiedVersionReaders([]EvidenceReader{{Name: "b", Reader: bytes.NewReader(nil)}, {Name: "a", Reader: bytes.NewReader(nil)}}, 32); err == nil {
+		t.Fatal("VerifiedVersionReaders accepted unordered chunks")
+	}
+}
+
 func TestFinalizeRedactsEveryDynamicStringPosition(t *testing.T) {
 	unsafe := "token=sk-fictional-secret /fictional host.example.invalid 192.0.2.10"
 	nativeID := "00000000-0000-4000-8000-000000000002"

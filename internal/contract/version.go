@@ -23,6 +23,12 @@ type EvidenceChunk struct {
 	Content []byte
 }
 
+type EvidenceReader struct {
+	Name   string
+	Size   uint64
+	Reader io.Reader
+}
+
 func VerifiedVersion(chunks []EvidenceChunk) (VerifiedVersionID, error) {
 	if len(chunks) == 0 {
 		return VerifiedVersionID{}, errors.New("verified evidence is empty")
@@ -60,20 +66,41 @@ func VerifiedVersion(chunks []EvidenceChunk) (VerifiedVersionID, error) {
 // retaining the evidence in memory. It encodes one named chunk exactly as
 // VerifiedVersion does.
 func VerifiedVersionReader(name string, size uint64, reader io.Reader, maxBytes uint64) (VerifiedVersionID, error) {
-	if !validEvidenceName(name) {
-		return VerifiedVersionID{}, errors.New("invalid evidence chunk name")
-	}
-	if size > maxBytes || size > math.MaxInt64 {
-		return VerifiedVersionID{}, errors.New("verified evidence exceeds size limit")
+	return VerifiedVersionReaders([]EvidenceReader{{Name: name, Size: size, Reader: reader}}, maxBytes)
+}
+
+// VerifiedVersionReaders computes the v0 provider-content identifier from
+// ordered, named readers without retaining their content in memory. Chunk names
+// must already be in ascending order so callers cannot accidentally hash a
+// different order from VerifiedVersion.
+func VerifiedVersionReaders(chunks []EvidenceReader, maxBytes uint64) (VerifiedVersionID, error) {
+	if len(chunks) == 0 {
+		return VerifiedVersionID{}, errors.New("verified evidence is empty")
 	}
 	h := sha256.New()
 	_, _ = h.Write([]byte("agent-sessions:verified-version:v0\x00"))
-	writeUint64(h, uint64(len(name)))
-	_, _ = h.Write([]byte(name))
-	writeUint64(h, size)
-	written, err := io.CopyN(h, reader, int64(size))
-	if err != nil || uint64(written) != size {
-		return VerifiedVersionID{}, errors.New("verified evidence is shorter than declared")
+	var total uint64
+	for i, chunk := range chunks {
+		if !validEvidenceName(chunk.Name) {
+			return VerifiedVersionID{}, errors.New("invalid evidence chunk name")
+		}
+		if i > 0 && chunks[i-1].Name >= chunk.Name {
+			if chunks[i-1].Name == chunk.Name {
+				return VerifiedVersionID{}, errors.New("duplicate evidence chunk name")
+			}
+			return VerifiedVersionID{}, errors.New("evidence chunks are not ordered")
+		}
+		if chunk.Size > maxBytes-total || chunk.Size > math.MaxInt64 {
+			return VerifiedVersionID{}, errors.New("verified evidence exceeds size limit")
+		}
+		total += chunk.Size
+		writeUint64(h, uint64(len(chunk.Name)))
+		_, _ = h.Write([]byte(chunk.Name))
+		writeUint64(h, chunk.Size)
+		written, err := io.CopyN(h, chunk.Reader, int64(chunk.Size))
+		if err != nil || uint64(written) != chunk.Size {
+			return VerifiedVersionID{}, errors.New("verified evidence is shorter than declared")
+		}
 	}
 	return VerifiedVersionID{Algorithm: "sha256", Basis: "provider-content-v0", Value: "sha256:" + hex.EncodeToString(h.Sum(nil))}, nil
 }

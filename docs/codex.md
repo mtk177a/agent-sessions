@@ -22,31 +22,34 @@ The `session_meta.payload.id` field is the provider-native thread identity, so m
 When more than one artifact represents the same thread, the adapter follows Codex's current rollout selection ordering by timestamp and rollout ID.\
 If that ordering cannot distinguish the current artifact, content operations return `unsupported` instead of silently selecting one copy.
 
-Without inherited history, the list version hint remains a domain-separated hash of the current file size and modification time.\
-With safely resolved inherited history, `content_hash` uses the `v1` Codex hint namespace and hashes the included byte ranges in rollout order with their rollout IDs and byte lengths; an unresolved lineage has no hint.\
+Without inherited or sliced history, the list version hint remains a domain-separated hash of the current file size and modification time.\
+With safely resolved inherited history or a subagent history boundary, `content_hash` uses the `v2` Codex hint namespace and hashes the selected header and included byte ranges in logical order; an unresolved lineage has no hint.\
+Rows before `subagent_history_start_ordinal` belong to the copied parent context and do not affect the child source's hint, events, verification, or interaction time.\
 The hint remains a change signal, not a verified source version.\
-Verification hashes bounded provider content through the common `VerifiedVersion` contract, using the path-free evidence name `rollout/primary.jsonl`.
+Logical-history verification streams bounded provider content through the common `VerifiedVersion` contract.\
+An unsliced rollout retains the path-free evidence name `rollout/primary.jsonl`; a logical history uses ordered, path-free header and history chunk names.
 
 ## Version-sensitive decoding
 
-The decoder accepts verified rollout JSONL structures from Codex CLI `0.149.1`, `0.152.0`, `0.153.0`, `0.153.3`, `0.153.4`, and `0.154.0`, plus the observed Codex App builds `0.154.0-alpha.6.2` and `0.155.0-alpha.9.2`.\
+The decoder accepts the verified mode and structure combinations for the 32 observed version labels from `0.92.0` through `0.155.0-alpha.9.2`.\
 The older boundary was checked against the official `openai/codex` tag [`rust-v0.149.1`](https://github.com/openai/codex/tree/rust-v0.149.1) at commit [`ff29a44391deccde0aba0f8390337d7f3c319ea4`](https://github.com/openai/codex/commit/ff29a44391deccde0aba0f8390337d7f3c319ea4).\
 The `0.153.0` boundary was checked against the official [`rust-v0.153.0` history implementation](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs); its `token_usage_record` is bookkeeping, while an encountered `realtime_item` remains incomplete because its interaction meaning is not normalized.
 The additional versions were checked against their official [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs), [`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs), [`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs), and [`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) item definitions and against bounded, read-only structural inspection of saved rollouts; no private contents or identifiers were copied into this repository.
 The two App build versions were also checked against their official [`0.154.0-alpha.6.2`](https://github.com/openai/codex/blob/rust-v0.154.0-alpha.6.2/codex-rs/protocol/src/items.rs) and [`0.155.0-alpha.9.2`](https://raw.githubusercontent.com/openai/codex/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) item definitions and saved rollout structures, including both history modes observed for `0.155.0-alpha.9.2`.
 
-For `list` and `show` interaction time only, the adapter additionally accepts paginated rollouts labeled `0.98.0`, `0.117.0`, `0.144.2`, `0.147.0`, and `0.148.0-alpha.9`.\
-The latter three versions' paginated item and response persistence rules were checked against the corresponding official [`0.144.2`](https://github.com/openai/codex/blob/rust-v0.144.2/codex-rs/rollout/src/policy.rs), [`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs), and [`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs) implementations and bounded structural inspection of saved rollouts.\
-These versions remain unverified for `events` and `verify`.\
+The native paginated profile covers the verified labels from `0.144.5` onward, including the previously supported versions and observed alpha builds.\
+Its item and response persistence rules were checked against the corresponding official implementations, including [`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs) and [`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs), and bounded structural inspection of saved rollouts.\
 The original [`0.98.0`](https://github.com/openai/codex/blob/rust-v0.98.0/codex-rs/protocol/src/protocol.rs) and [`0.117.0`](https://github.com/openai/codex/blob/rust-v0.117.0/codex-rs/protocol/src/protocol.rs) formats did not include paginated ordinals.\
 Codex's [legacy-to-paginated migration](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs) retains the header CLI version while rewriting the stored rows.\
-For these two labels, interaction time is supported only for the verified migrated shape: paginated history with contiguous ordinals and a version-specific set of recognized rows.\
-An unrecognized row, a legacy-mode artifact, or invalid ordinals leaves interaction time unavailable; the header version alone does not establish compatibility.
+The canonicalized legacy paginated profile covers the verified migrated labels `0.92.0`, `0.94.0`, `0.94.0-alpha.10`, `0.95.0-alpha.3`, `0.98.0`, `0.99.0-alpha.5`, `0.101.0`, `0.117.0`, `0.118.0`, `0.139.0`, `0.142.5`, and `0.144.2`.\
+It requires contiguous ordinals and the verified migrated row vocabulary.\
+An unrecognized row, an unsupported history mode, or invalid ordinals leaves the affected observation unavailable; the header version alone does not establish compatibility.
 
 The adapter recognizes the `session_meta`, `event_msg`, and `response_item` rollout envelopes needed for the public observations.\
 For legacy history, `user_message` and `agent_message` events are the canonical message rows, while response tool calls and their persisted output rows provide correlation evidence.\
 Legacy output rows do not persist the internal success value, so the adapter omits the normalized result instead of guessing its outcome.\
-For paginated history, completed `UserMessage`, `AgentMessage`, `CommandExecution`, `McpToolCall`, and `DynamicToolCall` items are canonical; lower-level response rows are not emitted again.
+For native paginated history, completed `UserMessage`, `AgentMessage`, `CommandExecution`, `McpToolCall`, and `DynamicToolCall` items are canonical; lower-level response rows are not emitted again.\
+For canonicalized legacy paginated history, completed message items are canonical while legacy response rows provide tool call and result correlation; completed tool items are not emitted again.
 
 Tool call identifiers are deterministic adapter-owned hashes of the thread identity and provider correlation identifier.\
 Public categories are limited to `shell`, `file_change`, `mcp`, and `tool`; raw commands, arguments, tool payloads, and arbitrary provider tool names are not normalized into public structural fields.
@@ -70,6 +73,7 @@ The `0.144.2` completed `Sleep` item is a tool interaction.\
 For migrated `0.98.0` and `0.117.0` rollouts, only the observed message, tool, search, and bookkeeping row types are classified; completed `Reasoning`, `Plan`, and `ContextCompaction` and the `compacted` envelope do not advance time.\
 Later token accounting, lifecycle events, and provider errors do not advance it.\
 For `history_base`, the adapter follows the referenced rollout ID and reads only the inherited prefix ending at the recorded ordinal and byte offset.\
+For `subagent_history_start_ordinal`, it excludes copied parent rows and retains only the selected child session's rows.\
 Missing or invalid timestamps, uncertain rows, unresolved history, and input limits prevent a source time rather than triggering a file-time fallback.
 
 ## Completeness and limitations
@@ -78,11 +82,11 @@ Unknown envelopes, unknown event variants, unsupported known items or message co
 Useful observations return `partial`; a recognized source that cannot yield a safe useful result returns `unsupported`; I/O and resource failures return `error`.
 
 Compressed `.jsonl.zst` rollouts are recognized but not decoded because the executable has no external compression dependency.\
-For `events` and `verify`, rollouts with `history_base` still return only current-artifact observations and report the omitted inherited prefix.\
-`verify` is partial; `events` is partial when useful current events exist and unsupported otherwise.
+Safely resolved inherited and sliced histories are used consistently by `list`, `show`, `events`, and `verify`.\
+Known items that cannot be represented by the public event model still produce explicit omissions.
 
-Interaction-time reading is limited to 128 MiB across the effective history, 4 MiB per row, and 32 rollout segments.\
-For `events` and `verify`, artifacts remain limited to 64 MiB and rows to 1 MiB; headers remain limited to 1 MiB, discovered files to 100,000, and normalized events to 100,000.\
+Codex logical-history reading is limited to 128 MiB, 4 MiB per row, and 32 rollout segments.\
+Headers remain limited to 1 MiB, discovered files to 100,000, and normalized events to 100,000.\
 These are adapter input bounds in addition to the public response and pagination bounds.
 
 Read-only commands create no index, cache, mirror, database, or provider application metadata update.\

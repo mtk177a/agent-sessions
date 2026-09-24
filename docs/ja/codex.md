@@ -27,34 +27,37 @@ Codex は `$CODEX_HOME` をデータディレクトリとして文書化して�
 同じスレッドを表す成果物が複数ある場合、アダプターはタイムスタンプとロールアウト ID による Codex の現在のロールアウト選択順序に従う。\
 その順序で現在の成果物を区別できない場合、内容に関する操作はコピーを黙って一つ選ばず `unsupported` を返す。
 
-継承履歴がない場合、一覧のバージョンヒントは従来どおり、現在のファイルサイズと変更時刻をドメイン分離してハッシュ化する。\
-継承履歴を安全に解決できた場合、`content_hash` は Codex のヒント用 `v1` 名前空間を使い、ロールアウト順に採用したバイト範囲と、そのロールアウト ID・バイト長をハッシュ化する。\
+継承や切り取りがない場合、一覧のバージョンヒントは従来どおり、現在のファイルサイズと変更時刻をドメイン分離してハッシュ化する。\
+継承履歴またはサブエージェントの履歴境界を安全に解決できた場合、`content_hash` は Codex のヒント用 `v2` 名前空間を使い、選択中のヘッダーと採用したバイト範囲を論理的な順序でハッシュ化する。\
+`subagent_history_start_ordinal` より前の行は親からコピーされた文脈なので、子ソースのヒント、イベント、検証、やり取り時刻に影響しない。\
 履歴を解決できない場合、ヒントは出さない。\
 このヒントは変更検出の目安であり、検証済みのソース版ではない。\
-検証では、共通の `VerifiedVersion` 仕様を通じてプロバイダーの内容をサイズ制限内でハッシュし、パスを含まない証拠名 `rollout/primary.jsonl` を使用する。
+論理履歴の検証では、共通の `VerifiedVersion` 仕様を通じて、上限内のプロバイダー内容を逐次ハッシュ化する。\
+切り取りのないロールアウトではパスを含まない証拠名 `rollout/primary.jsonl` を維持し、論理履歴では順序付きのヘッダー用・履歴用の名前を使う。
 
 ## バージョン依存のデコード
 
-デコーダーは、Codex CLI `0.149.1`、`0.152.0`、`0.153.0`、`0.153.3`、`0.153.4`、`0.154.0` と、観測済みの Codex App ビルド `0.154.0-alpha.6.2`、`0.155.0-alpha.9.2` のロールアウト JSONL 構造を受け付ける。\
+デコーダーは、`0.92.0` から `0.155.0-alpha.9.2` までに観測した 32 個の版名について、確認済みの履歴方式と構造の組み合わせを受け付ける。\
 従来の境界は、公式の `openai/codex` タグ [`rust-v0.149.1`](https://github.com/openai/codex/tree/rust-v0.149.1) のコミット [`ff29a44391deccde0aba0f8390337d7f3c319ea4`](https://github.com/openai/codex/commit/ff29a44391deccde0aba0f8390337d7f3c319ea4) に対して確認している。\
 `0.153.0` の境界は、公式の [`rust-v0.153.0` の履歴実装](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs) に対して確認した。\
 追加した版は、公式の [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs)、[`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs)、[`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs)、[`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) の項目定義と、保存済みロールアウトの構造に対する上限付き・読み取り専用の調査で確認した。非公開の本文や識別子は、このリポジトリへ複製していない。
 Codex App の 2 つのビルド版も、公式の [`0.154.0-alpha.6.2`](https://github.com/openai/codex/blob/rust-v0.154.0-alpha.6.2/codex-rs/protocol/src/items.rs) と [`0.155.0-alpha.9.2`](https://raw.githubusercontent.com/openai/codex/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) の項目定義、および保存済みロールアウトの構造に対して確認した。`0.155.0-alpha.9.2` では、観測された 2 種類の履歴方式を調べた。
 
-`list` と `show` のやり取り時刻に限り、アダプターは `0.98.0`、`0.117.0`、`0.144.2`、`0.147.0`、`0.148.0-alpha.9` と記されたページ分割形式のロールアウトにも対応する。\
-後者の 3 版について、ページ分割形式の項目とレスポンスの保存規則を、対応する公式実装の [`0.144.2`](https://github.com/openai/codex/blob/rust-v0.144.2/codex-rs/rollout/src/policy.rs)、[`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs)、[`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs) と、保存済みロールアウトの構造に対する上限付きの調査で確認した。\
-これらの版について、`events` と `verify` は引き続き未検証である。\
+native paginated 形式は、`0.144.5` 以降の確認済み版名を対象とし、従来の対応版と観測済みの alpha ビルドを含む。\
+項目とレスポンスの保存規則は、対応する公式実装の [`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs)、[`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs) などと、保存済みロールアウトの構造に対する上限付きの調査で確認した。\
 元の [`0.98.0`](https://github.com/openai/codex/blob/rust-v0.98.0/codex-rs/protocol/src/protocol.rs) と [`0.117.0`](https://github.com/openai/codex/blob/rust-v0.117.0/codex-rs/protocol/src/protocol.rs) の形式には、ページ分割形式の行番号がなかった。\
 Codex の[旧形式からページ分割形式への移行処理](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs)は、保存行を書き換えるとき、ヘッダーの CLI 版を保持する。\
-この 2 つの版名については、ページ分割形式で行番号が連続し、版ごとに確認した行の種類だけが含まれる移行後の形式に限って、やり取り時刻に対応する。\
-未知の行、旧形式の記録、行番号の不一致があれば時刻を出さない。\
+canonicalized legacy paginated 形式は、確認済みの移行後版名 `0.92.0`、`0.94.0`、`0.94.0-alpha.10`、`0.95.0-alpha.3`、`0.98.0`、`0.99.0-alpha.5`、`0.101.0`、`0.117.0`、`0.118.0`、`0.139.0`、`0.142.5`、`0.144.2` を対象とする。\
+この形式では、行番号の連続性と、確認済みの移行後の行だけが含まれることを必須とする。\
+未知の行、未対応の履歴方式、行番号の不一致があれば、影響する観測を利用可能としない。\
 ヘッダーの版名だけでは対応可否を判断しない。
 `token_usage_record` は管理用の行として扱い、`realtime_item` が現れた場合はやり取りとして正規化できないため、不完全として扱う。
 
 アダプターは、公開される観測に必要な `session_meta`、`event_msg`、`response_item` のロールアウト用エンベロープを認識する。\
 旧形式の履歴では、`user_message` と `agent_message` のイベントが正規のメッセージ行であり、レスポンスのツール呼び出しと保存済みの出力行が相関の証拠を提供する。\
 旧形式の出力行には内部の成功値が保存されないため、アダプターは結果を推測せず、正規化した結果を省略する。\
-ページ分割された履歴では、完了済みの `UserMessage`、`AgentMessage`、`CommandExecution`、`McpToolCall`、`DynamicToolCall` の項目が正規のものとなり、下位レベルのレスポンス行は重ねて出力しない。
+native paginated 履歴では、完了済みの `UserMessage`、`AgentMessage`、`CommandExecution`、`McpToolCall`、`DynamicToolCall` の項目が正規のものとなり、下位レベルのレスポンス行は重ねて出力しない。\
+canonicalized legacy paginated 履歴では、完了済みメッセージ項目を正規のものとし、ツール呼び出しと結果の対応には旧形式のレスポンス行を使い、完了済みツール項目を重ねて出力しない。
 
 ツール呼び出し ID は、スレッド識別子とプロバイダーの相関識別子から決定的に生成する、アダプターが所有するハッシュである。\
 公開するカテゴリは `shell`、`file_change`、`mcp`、`tool` に限定し、生のコマンド、引数、ツールのペイロード、任意のプロバイダーツール名は公開構造フィールドへ正規化しない。
@@ -81,6 +84,7 @@ Codex の[旧形式からページ分割形式への移行処理](https://github
 完了した `Reasoning`、`Plan`、`ContextCompaction` と `compacted` 行は時刻を進めない。\
 それより後のトークン使用量、ライフサイクルイベント、プロバイダーエラーは、この時刻を進めない。\
 `history_base` がある場合、参照先のロールアウト ID をたどり、記録された行番号とバイト位置までの継承部分だけを読み取る。\
+`subagent_history_start_ordinal` がある場合、親からコピーされた行を除外し、選択中の子セッション自身の行だけを残す。\
 時刻の欠落・不正値、不明確な行、履歴を解決できない場合、入力上限を超えた場合は、ファイルの更新時刻で補わず、ソースの時刻を出さない。
 
 ## 完全性と制限
@@ -89,11 +93,10 @@ Codex の[旧形式からページ分割形式への移行処理](https://github
 有用な観測がある場合は `partial` を返し、認識したソースから安全で有用な結果を得られない場合は `unsupported` を返し、I/O とリソースの失敗は `error` を返す。
 
 圧縮された `.jsonl.zst` ロールアウトは認識するが、実行ファイルに外部圧縮依存がないためデコードしない。\
-`events` と `verify` では、`history_base` を持つロールアウトについて、引き続き現在の成果物の観測だけを返し、継承された先頭部分の省略を報告する。\
-`verify` は `partial` となり、`events` は現在の成果物に有用なイベントがあれば `partial`、なければ `unsupported` となる。
+安全に解決できた継承履歴と切り取り履歴は、`list`、`show`、`events`、`verify` で一貫して使用する。\
+公開イベント形式で表せない既知の項目は、引き続き明示的な省略として報告する。
 
-やり取りの時刻を読む処理は、現在有効な履歴の合計 128 MiB、1 行 4 MiB、ロールアウト 32 個に制限する。\
-`events` と `verify` では、引き続き成果物を 64 MiB、行を 1 MiB に制限する。\
+Codex の論理履歴を読む処理は、合計 128 MiB、1 行 4 MiB、ロールアウト 32 個に制限する。\
 ヘッダーは 1 MiB、検出するファイルは 100,000 個、正規化するイベントは 100,000 件に制限する。\
 これらは、公開レスポンスとページ分割の制限に加わるアダプター入力の制限である。
 

@@ -2,11 +2,11 @@ package codex
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"hash"
 	"io"
 	"os"
 	"reflect"
@@ -24,8 +24,25 @@ type historySpan struct {
 	end  uint64
 }
 
-// resolveHistory describes the effective prefix of each rollout, oldest first.
-// HistoryPosition.thread_id identifies a rollout file, not necessarily a thread.
+type historyRange struct {
+	item  artifact
+	start uint64
+	end   uint64
+}
+
+type historyPlan struct {
+	spans         []historySpan
+	header        historyRange
+	ranges        []historyRange
+	logical       bool
+	hint          string
+	malformedRows int
+	oversizedRows int
+}
+
+// resolveHistory describes the inherited prefixes and current rollout, oldest
+// first. HistoryPosition.thread_id identifies a rollout file, not necessarily a
+// logical thread.
 func resolveHistory(selected artifact, byRollout map[string][]artifact) ([]historySpan, error) {
 	spans := make([]historySpan, 0, 2)
 	seen := map[string]bool{}
@@ -61,38 +78,48 @@ func resolveHistory(selected artifact, byRollout map[string][]artifact) ([]histo
 	return spans, nil
 }
 
-// walkHistory validates ordinal and byte boundaries while streaming effective rows.
-// The caller supplies limits and whether a single-span history requires ordinals.
-func walkHistory(root string, spans []historySpan, maxBytes, maxRowBytes int64, requireOrdinals bool, visit func(artifact, rolloutLine)) (string, error) {
+// walkHistory validates the physical history and visits only rows belonging to
+// the selected logical session. A subagent start ordinal excludes its copied
+// parent prefix. The selected header remains control evidence.
+func walkHistory(root string, spans []historySpan, maxBytes, maxRowBytes int64, requireOrdinals bool, visit func(artifact, rolloutLine)) (historyPlan, error) {
 	if len(spans) == 0 || maxBytes <= 0 || maxRowBytes <= 0 {
-		return "", errors.New("invalid history reader limits")
+		return historyPlan{}, errors.New("invalid history reader limits")
 	}
 	var total uint64
+	selected := spans[len(spans)-1].item
+	logical := len(spans) > 1 || selected.meta.SubagentHistoryStartOrdinal != nil
 	for _, span := range spans {
 		if span.end > uint64(maxBytes)-total {
-			return "", errors.New("effective history exceeds size limit")
+			return historyPlan{}, errors.New("effective history exceeds size limit")
 		}
 		total += span.end
+		requireOrdinals = requireOrdinals || logical && span.item.meta.HistoryMode == "paginated"
 	}
+	plan := historyPlan{spans: spans, logical: logical}
 	h := sha256.New()
-	_, _ = h.Write([]byte("agent-sessions:codex-version-hint:v1\x00"))
-	var count [8]byte
-	binary.BigEndian.PutUint64(count[:], uint64(len(spans)))
-	_, _ = h.Write(count[:])
-	requireOrdinals = requireOrdinals || len(spans) > 1
+	if logical {
+		_, _ = h.Write([]byte("agent-sessions:codex-version-hint:v2\x00"))
+	}
 	var nextOrdinal uint64
 	for i, span := range spans {
-		if err := walkHistorySpan(root, span, maxRowBytes, requireOrdinals, i == len(spans)-1, &nextOrdinal, h, visit); err != nil {
-			return "", err
+		current := i == len(spans)-1
+		if err := scanHistorySpan(root, span, maxRowBytes, requireOrdinals, current, selected, &nextOrdinal, &plan, h, visit); err != nil {
+			return historyPlan{}, err
 		}
 		if i+1 < len(spans) && nextOrdinal != spans[i+1].item.meta.HistoryBase.EndOrdinalExclusive {
-			return "", errors.New("history ordinal boundary does not match")
+			return historyPlan{}, errors.New("history ordinal boundary does not match")
 		}
 	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+	if boundary := selected.meta.SubagentHistoryStartOrdinal; boundary != nil && *boundary > nextOrdinal {
+		return historyPlan{}, errors.New("subagent history boundary is beyond the rollout")
+	}
+	if logical {
+		plan.hint = "sha256:" + hex.EncodeToString(h.Sum(nil))
+	}
+	return plan, nil
 }
 
-func walkHistorySpan(root string, span historySpan, maxRowBytes int64, requireOrdinals, current bool, nextOrdinal *uint64, h hash.Hash, visit func(artifact, rolloutLine)) error {
+func scanHistorySpan(root string, span historySpan, maxRowBytes int64, requireOrdinals, current bool, selected artifact, nextOrdinal *uint64, plan *historyPlan, hint io.Writer, visit func(artifact, rolloutLine)) error {
 	file, err := safeio.OpenRegularWithin(root, span.item.relative)
 	if err != nil {
 		return err
@@ -103,7 +130,6 @@ func walkHistorySpan(root string, span historySpan, maxRowBytes int64, requireOr
 		return errors.New("rollout history is shorter than its boundary")
 	}
 	if current && uint64(before.Size()) != span.end {
-		// A current rollout is always read to the size observed during discovery.
 		return errors.New("current rollout changed during discovery")
 	}
 	if span.end > 0 && !current {
@@ -112,23 +138,40 @@ func walkHistorySpan(root string, span historySpan, maxRowBytes int64, requireOr
 			return errors.New("history byte boundary is not a JSONL boundary")
 		}
 	}
-	_, _ = h.Write([]byte(span.item.rolloutID))
-	var length [8]byte
-	binary.BigEndian.PutUint64(length[:], span.end)
-	_, _ = h.Write(length[:])
+
 	limited := &io.LimitedReader{R: file, N: int64(span.end)}
-	scanner := bufio.NewScanner(io.TeeReader(limited, h))
-	initialBuffer := int(maxRowBytes)
-	if initialBuffer > 64<<10 {
-		initialBuffer = 64 << 10
-	}
-	scanner.Buffer(make([]byte, initialBuffer), int(maxRowBytes))
+	reader := bufio.NewReaderSize(limited, 64<<10)
 	first := true
-	for scanner.Scan() {
-		var line rolloutLine
-		if err := safeio.DecodeJSON(scanner.Bytes(), contract.MaxJSONDepth, &line); err != nil {
-			return err
+	var offset uint64
+	for limited.N > 0 || reader.Buffered() > 0 {
+		raw, oversized, readErr := readBoundedJSONLRow(reader, maxRowBytes)
+		if len(raw) == 0 && readErr == io.EOF && !oversized {
+			break
 		}
+		if oversized {
+			if first || plan.logical || requireOrdinals {
+				return errors.New("rollout row exceeds size limit")
+			}
+			plan.oversizedRows++
+			if readErr == io.EOF {
+				break
+			}
+			continue
+		}
+		var line rolloutLine
+		if err := safeio.DecodeJSON(bytes.TrimSuffix(raw, []byte{'\n'}), contract.MaxJSONDepth, &line); err != nil {
+			if first || plan.logical || requireOrdinals {
+				return err
+			}
+			plan.malformedRows++
+			offset += uint64(len(raw))
+			if readErr == io.EOF {
+				break
+			}
+			continue
+		}
+		start, end := offset, offset+uint64(len(raw))
+		offset = end
 		if first {
 			if line.Type != "session_meta" {
 				return errors.New("rollout header missing")
@@ -145,9 +188,35 @@ func walkHistorySpan(root string, span historySpan, maxRowBytes int64, requireOr
 			}
 			*nextOrdinal++
 		}
-		visit(span.item, line)
+
+		selectedHeader := span.item.relative == selected.relative && line.Type == "session_meta"
+		included := line.Type != "session_meta"
+		if boundary := selected.meta.SubagentHistoryStartOrdinal; boundary != nil {
+			included = included && line.Ordinal != nil && *line.Ordinal >= *boundary
+		}
+		if selectedHeader {
+			plan.header = historyRange{item: span.item, start: start, end: end}
+			if plan.logical {
+				writeHintPart(hint, "header", raw)
+			}
+			visit(span.item, line)
+		} else if included {
+			appendHistoryRange(plan, span.item, start, end)
+			if plan.logical {
+				writeHintPart(hint, "row", raw)
+			}
+			visit(span.item, line)
+		} else if !plan.logical {
+			visit(span.item, line)
+		}
+		if readErr != nil && readErr != io.EOF {
+			return readErr
+		}
+		if readErr == io.EOF {
+			break
+		}
 	}
-	if scanner.Err() != nil || limited.N != 0 || (span.end != 0 && first) {
+	if limited.N != 0 || (span.end != 0 && first) {
 		return errors.New("rollout history could not be read within limits")
 	}
 	after, err := file.Stat()
@@ -155,6 +224,53 @@ func walkHistorySpan(root string, span historySpan, maxRowBytes int64, requireOr
 		return errors.New("rollout history changed while reading")
 	}
 	return nil
+}
+
+func readBoundedJSONLRow(reader *bufio.Reader, maxBytes int64) ([]byte, bool, error) {
+	var raw []byte
+	var size int64
+	oversized := false
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		size += int64(len(fragment))
+		if !oversized && size <= maxBytes {
+			raw = append(raw, fragment...)
+		} else {
+			oversized = true
+			raw = nil
+		}
+		switch err {
+		case nil:
+			return raw, oversized, nil
+		case bufio.ErrBufferFull:
+			continue
+		case io.EOF:
+			return raw, oversized, io.EOF
+		default:
+			return nil, oversized, err
+		}
+	}
+}
+
+func appendHistoryRange(plan *historyPlan, item artifact, start, end uint64) {
+	if len(plan.ranges) > 0 {
+		last := &plan.ranges[len(plan.ranges)-1]
+		if last.item.relative == item.relative && last.end == start {
+			last.end = end
+			return
+		}
+	}
+	plan.ranges = append(plan.ranges, historyRange{item: item, start: start, end: end})
+}
+
+func writeHintPart(w io.Writer, kind string, raw []byte) {
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(kind)))
+	_, _ = w.Write(length[:])
+	_, _ = w.Write([]byte(kind))
+	binary.BigEndian.PutUint64(length[:], uint64(len(raw)))
+	_, _ = w.Write(length[:])
+	_, _ = w.Write(raw)
 }
 
 func decodeHistoryMeta(line rolloutLine) (sessionMeta, error) {

@@ -114,10 +114,10 @@ func TestInteractionTimeOnlySupportsVerifiedOlderPaginatedVersions(t *testing.T)
 		t.Run(version, func(t *testing.T) {
 			home := t.TempDir()
 			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
-				header(testThreadID, version, "paginated", ""),
-				completedMessage("2026-09-03T10:00:00Z", "UserMessage"),
-				`{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"fictional-search"}}}`,
-				`{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`,
+				withOrdinal(0, header(testThreadID, version, "paginated", "")),
+				withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+				withOrdinal(2, `{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"fictional-search"}}}`),
+				withOrdinal(3, `{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`),
 			})
 			fingerprint := contract.SourceFingerprint(testThreadID)
 			adapter := New()
@@ -135,10 +135,10 @@ func TestInteractionTimeOnlySupportsVerifiedOlderPaginatedVersions(t *testing.T)
 					t.Fatalf("%s = sources=%#v omissions=%#v", result.name, result.sources, result.omissions)
 				}
 			}
-			if events := adapter.Events(context.Background(), testSource(home), fingerprint); !hasOmission(events.Omissions, "unsupported_format") {
+			if events := adapter.Events(context.Background(), testSource(home), fingerprint); hasOmission(events.Omissions, "unsupported_format") {
 				t.Fatalf("Events() = %#v", events)
 			}
-			if evidence := adapter.Evidence(context.Background(), testSource(home), fingerprint); !hasOmission(evidence.Omissions, "unsupported_format") {
+			if evidence := adapter.Evidence(context.Background(), testSource(home), fingerprint); evidence.Status != contract.StatusComplete {
 				t.Fatalf("Evidence() = %#v", evidence)
 			}
 		})
@@ -149,7 +149,6 @@ func TestOlderInteractionTimeRejectsUnverifiedFormats(t *testing.T) {
 	for _, tc := range []struct{ version, mode string }{
 		{"0.98.0", "legacy"},
 		{"0.117.0", "legacy"},
-		{"0.142.5", "paginated"},
 		{"0.144.2", "legacy"},
 	} {
 		t.Run(tc.version+"_"+tc.mode, func(t *testing.T) {
@@ -166,7 +165,7 @@ func TestOlderInteractionTimeRejectsUnverifiedFormats(t *testing.T) {
 	}
 }
 
-func TestMigratedOlderRolloutsExposeInteractionTimeOnly(t *testing.T) {
+func TestMigratedOlderRolloutsExposeInteractionTimeAndVerifiedFormat(t *testing.T) {
 	for _, tc := range []struct {
 		version string
 		rows    []string
@@ -212,10 +211,10 @@ func TestMigratedOlderRolloutsExposeInteractionTimeOnly(t *testing.T) {
 					t.Fatalf("%s = source=%#v omissions=%#v", result.name, result.source, result.omissions)
 				}
 			}
-			if events := adapter.Events(context.Background(), testSource(home), fingerprint); !hasOmission(events.Omissions, "unsupported_format") {
+			if events := adapter.Events(context.Background(), testSource(home), fingerprint); hasOmission(events.Omissions, "unsupported_format") {
 				t.Fatalf("Events() = %#v", events)
 			}
-			if evidence := adapter.Evidence(context.Background(), testSource(home), fingerprint); !hasOmission(evidence.Omissions, "unsupported_format") {
+			if evidence := adapter.Evidence(context.Background(), testSource(home), fingerprint); evidence.Status != contract.StatusComplete {
 				t.Fatalf("Evidence() = %#v", evidence)
 			}
 		})
@@ -229,8 +228,6 @@ func TestMigratedOlderRolloutsRejectUnverifiedShapeAndRows(t *testing.T) {
 	}{
 		{"missing_ordinal", "0.98.0", []string{withOrdinal(0, header(testThreadID, "0.98.0", "paginated", "")), completedMessage("2026-09-03T10:00:00Z", "UserMessage")}},
 		{"duplicate_ordinal", "0.117.0", []string{withOrdinal(0, header(testThreadID, "0.117.0", "paginated", "")), withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")), withOrdinal(1, completedMessage("2026-09-03T11:00:00Z", "AgentMessage"))}},
-		{"unverified_item", "0.98.0", []string{withOrdinal(0, header(testThreadID, "0.98.0", "paginated", "")), withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "CommandExecution"))}},
-		{"unverified_response", "0.117.0", []string{withOrdinal(0, header(testThreadID, "0.117.0", "paginated", "")), withOrdinal(1, `{"timestamp":"2026-09-03T10:00:00Z","type":"response_item","payload":{"type":"tool_search_call"}}`)}},
 		{"invalid_time", "0.117.0", []string{withOrdinal(0, header(testThreadID, "0.117.0", "paginated", "")), withOrdinal(1, completedMessage("not-a-time", "UserMessage"))}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -279,12 +276,18 @@ func TestOlderInteractionTimeIncludesSearchRowsWithoutCountingStatus(t *testing.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+			rows := []string{
 				header(testThreadID, tc.version, "paginated", ""),
 				completedMessage("2026-09-03T10:00:00Z", "UserMessage"),
 				tc.row,
 				`{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`,
-			})
+			}
+			if tc.version == "0.144.2" {
+				for i := range rows {
+					rows[i] = withOrdinal(i, rows[i])
+				}
+			}
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), rows)
 			result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
 			if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt == nil || *result.Sources[0].LastInteractionAt != "2026-09-03T11:00:00Z" {
 				t.Fatalf("Show() = %#v", result)
@@ -321,11 +324,8 @@ func TestOlderChildWithoutInteractionRemainsListed(t *testing.T) {
 func TestOlderInteractionTimeFailsClosedForUncertainRows(t *testing.T) {
 	for _, tc := range []struct{ version, row string }{
 		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FutureTool","id":"fictional-tool"}}}`},
-		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FunctionCallOutput","id":"fictional-tool"}}}`},
 		{"0.148.0-alpha.9", `{"timestamp":"invalid","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"fictional-search"}}}`},
 		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"future_tool_call"}}`},
-		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"configuration_update"}}`},
-		{"0.148.0-alpha.9", `{"timestamp":"2026-09-03T11:00:00Z","type":"security_risk_score","payload":{}}`},
 		{"0.144.2", completedExtension("2026-09-03T11:00:00Z", "clock.sleep")},
 	} {
 		home := t.TempDir()

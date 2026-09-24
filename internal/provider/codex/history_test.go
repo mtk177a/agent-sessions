@@ -165,10 +165,10 @@ func TestRevertedRolloutChainUsesRolloutIDsAndOriginVersions(t *testing.T) {
 	if shown.Status != contract.StatusComplete || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T14:00:00Z" || shown.Sources[0].VersionHint == nil || shown.Sources[0].VersionHint.Kind != "content_hash" {
 		t.Fatalf("Show() = %#v", shown)
 	}
-	if events := New().Events(context.Background(), source, fingerprint); events.Status != contract.StatusPartial || !hasOmission(events.Omissions, "unsupported_format") {
+	if events := New().Events(context.Background(), source, fingerprint); events.Status != contract.StatusPartial || hasOmission(events.Omissions, "unsupported_format") || len(events.Events) != 1 {
 		t.Fatalf("Events() = %#v", events)
 	}
-	if evidence := New().Evidence(context.Background(), source, fingerprint); evidence.Status != contract.StatusPartial || !hasOmission(evidence.Omissions, "unsupported_format") {
+	if evidence := New().Evidence(context.Background(), source, fingerprint); evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil {
 		t.Fatalf("Evidence() = %#v", evidence)
 	}
 }
@@ -222,7 +222,8 @@ func TestUnsafeInheritedHistoryOmitsTimeAndHint(t *testing.T) {
 			if shown.Status != contract.StatusPartial || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt != nil || !hasOmission(shown.Omissions, "source_time_unavailable") {
 				t.Fatalf("Show() = %#v", shown)
 			}
-			if (shown.Sources[0].VersionHint != nil) != (tc.itemKind != "") {
+			expectHint := tc.itemKind != "" || tc.baseVersion != ""
+			if (shown.Sources[0].VersionHint != nil) != expectHint {
 				t.Fatalf("unexpected hint for %s: %#v", tc.name, shown.Sources[0].VersionHint)
 			}
 		})
@@ -260,5 +261,115 @@ func TestHistoryReaderUsesCallerLimits(t *testing.T) {
 		if _, err := walkHistory(home, spans, limits[0], limits[1], false, func(artifact, rolloutLine) {}); err == nil {
 			t.Fatalf("walkHistory succeeded with limits %v", limits)
 		}
+	}
+}
+
+func TestSubagentHistoryUsesOnlyChildOwnedRows(t *testing.T) {
+	home := t.TempDir()
+	extra := `,"subagent_history_start_ordinal":3`
+	path := rolloutPath(home, "sessions", testThreadID)
+	rows := []string{
+		withOrdinal(0, header(testThreadID, "0.153.4", "paginated", extra)),
+		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+		withOrdinal(2, completedMessage("2026-09-03T11:00:00Z", "AgentMessage")),
+		withOrdinal(3, completedMessage("2026-09-03T12:00:00Z", "AgentMessage")),
+	}
+	writeRollout(t, path, rows)
+	adapter := New()
+	source := testSource(home)
+	fingerprint := contract.SourceFingerprint(testThreadID)
+	shown := adapter.Show(context.Background(), source, fingerprint)
+	if shown.Status != contract.StatusComplete || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T12:00:00Z" || shown.Sources[0].VersionHint == nil || shown.Sources[0].VersionHint.Kind != "content_hash" {
+		t.Fatalf("Show() = %#v", shown)
+	}
+	events := adapter.Events(context.Background(), source, fingerprint)
+	if events.Status != contract.StatusComplete || len(events.Events) != 1 || events.Events[0].Message == nil || events.Events[0].Message.Role != "assistant" {
+		t.Fatalf("Events() = %#v", events)
+	}
+	evidence := adapter.Evidence(context.Background(), source, fingerprint)
+	if evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil || len(evidence.Chunks) != 0 {
+		t.Fatalf("Evidence() = %#v", evidence)
+	}
+	hint, verified := shown.Sources[0].VersionHint.Value, evidence.VerifiedVersion.Value
+	rows[1] = strings.Replace(rows[1], "10:00:00", "10:00:01", 1)
+	writeRollout(t, path, rows)
+	shown = adapter.Show(context.Background(), source, fingerprint)
+	evidence = adapter.Evidence(context.Background(), source, fingerprint)
+	if shown.Sources[0].VersionHint == nil || shown.Sources[0].VersionHint.Value != hint || evidence.VerifiedVersion == nil || evidence.VerifiedVersion.Value != verified {
+		t.Fatalf("excluded parent prefix changed child identity: show=%#v evidence=%#v", shown, evidence)
+	}
+}
+
+func TestInactiveSubagentRemainsListedWithoutInteractionTime(t *testing.T) {
+	home := t.TempDir()
+	extra := `,"subagent_history_start_ordinal":3`
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		withOrdinal(0, header(testThreadID, "0.153.4", "paginated", extra)),
+		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+		withOrdinal(2, completedMessage("2026-09-03T11:00:00Z", "AgentMessage")),
+	})
+	adapter := New()
+	source := testSource(home)
+	fingerprint := contract.SourceFingerprint(testThreadID)
+	shown := adapter.Show(context.Background(), source, fingerprint)
+	if len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt != nil || !hasOmission(shown.Omissions, "source_time_unavailable") {
+		t.Fatalf("Show() = %#v", shown)
+	}
+	events := adapter.Events(context.Background(), source, fingerprint)
+	if events.Status != contract.StatusComplete || len(events.Events) != 0 {
+		t.Fatalf("Events() = %#v", events)
+	}
+	evidence := adapter.Evidence(context.Background(), source, fingerprint)
+	if evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil {
+		t.Fatalf("Evidence() = %#v", evidence)
+	}
+}
+
+func TestExcludedUnsupportedParentDoesNotPoisonSubagent(t *testing.T) {
+	home := t.TempDir()
+	base := []string{
+		withOrdinal(0, header(testThreadID, "9.9.9", "paginated", "")),
+		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+	}
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), base)
+	cutoff := len(base[0]) + len(base[1]) + 2
+	extra := fmt.Sprintf(`,"history_base":{"thread_id":"%s","end_ordinal_exclusive":2,"end_byte_offset":%d},"subagent_history_start_ordinal":3`, testThreadID, cutoff)
+	writeRollout(t, rolloutPath(home, "sessions", secondThreadID), []string{
+		withOrdinal(2, header(secondThreadID, "0.153.4", "paginated", extra)),
+		withOrdinal(3, completedMessage("2026-09-03T12:00:00Z", "AgentMessage")),
+	})
+	adapter := New()
+	source := testSource(home)
+	fingerprint := contract.SourceFingerprint(secondThreadID)
+	shown := adapter.Show(context.Background(), source, fingerprint)
+	if shown.Status != contract.StatusComplete || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T12:00:00Z" {
+		t.Fatalf("Show() = %#v", shown)
+	}
+	if events := adapter.Events(context.Background(), source, fingerprint); events.Status != contract.StatusComplete || len(events.Events) != 1 {
+		t.Fatalf("Events() = %#v", events)
+	}
+	if evidence := adapter.Evidence(context.Background(), source, fingerprint); evidence.Status != contract.StatusComplete || evidence.VerifiedVersion == nil {
+		t.Fatalf("Evidence() = %#v", evidence)
+	}
+}
+
+func TestInvalidSubagentBoundaryFailsClosed(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		withOrdinal(0, header(testThreadID, "0.153.4", "paginated", `,"subagent_history_start_ordinal":9`)),
+		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "AgentMessage")),
+	})
+	adapter := New()
+	source := testSource(home)
+	fingerprint := contract.SourceFingerprint(testThreadID)
+	shown := adapter.Show(context.Background(), source, fingerprint)
+	if len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt != nil || shown.Sources[0].VersionHint != nil || !hasOmission(shown.Omissions, "source_time_unavailable") {
+		t.Fatalf("Show() = %#v", shown)
+	}
+	if events := adapter.Events(context.Background(), source, fingerprint); events.Status != contract.StatusUnsupported || !hasOmission(events.Omissions, "unsupported_format") {
+		t.Fatalf("Events() = %#v", events)
+	}
+	if evidence := adapter.Evidence(context.Background(), source, fingerprint); evidence.Status != contract.StatusUnsupported || !hasOmission(evidence.Omissions, "unsupported_format") {
+		t.Fatalf("Evidence() = %#v", evidence)
 	}
 }

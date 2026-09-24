@@ -12,29 +12,12 @@ const (
 	maxTimeRowBytes     = 4 << 20
 )
 
-// Older paginated rollouts are verified for interaction time only. Their
-// event and verification compatibility remains governed by isSupportedVersion.
-func supportsInteractionTime(version, historyMode string) bool {
-	if historyMode != "legacy" && historyMode != "paginated" {
-		return false
-	}
-	if isSupportedVersion(version) {
-		return true
-	}
-	return historyMode == "paginated" && isOlderTimeVersion(version)
-}
-
 func isOlderTimeVersion(version string) bool {
-	switch version {
-	case "0.98.0", "0.117.0", "0.144.2", "0.147.0", "0.148.0-alpha.9":
-		return true
-	default:
-		return false
-	}
+	return compatibilityProfile(version, "paginated") == profileCanonicalizedLegacyPaginated
 }
 
 func isMigratedLegacyTimeVersion(version string) bool {
-	return version == "0.98.0" || version == "0.117.0"
+	return compatibilityProfile(version, "paginated") == profileCanonicalizedLegacyPaginated
 }
 
 // readLastInteractionAt uses only recognized conversation rows. An unfamiliar row
@@ -48,12 +31,13 @@ func readLastInteractionAt(root string, item artifact, byRollout map[string][]ar
 	safeTime := true
 	requireOrdinals := false
 	for _, span := range spans {
-		if !supportsInteractionTime(span.item.meta.CLIVersion, span.item.meta.HistoryMode) {
-			return "", nil, false
-		}
 		requireOrdinals = requireOrdinals || isMigratedLegacyTimeVersion(span.item.meta.CLIVersion)
 	}
-	hintValue, err := walkHistory(root, spans, maxTimeHistoryBytes, maxTimeRowBytes, requireOrdinals, func(origin artifact, line rolloutLine) {
+	plan, err := walkHistory(root, spans, maxTimeHistoryBytes, maxTimeRowBytes, requireOrdinals, func(origin artifact, line rolloutLine) {
+		if !supportsInteractionTime(origin.meta.CLIVersion, origin.meta.HistoryMode) {
+			safeTime = false
+			return
+		}
 		activity, safe := codexInteractionRow(origin.meta.HistoryMode, origin.meta.CLIVersion, line)
 		if !safe {
 			safeTime = false
@@ -75,8 +59,8 @@ func readLastInteractionAt(root string, item artifact, byRollout map[string][]ar
 		return "", nil, false
 	}
 	var hint *contract.VersionHint
-	if item.meta.HistoryBase != nil {
-		hint = &contract.VersionHint{Kind: "content_hash", Value: hintValue}
+	if plan.logical {
+		hint = &contract.VersionHint{Kind: "content_hash", Value: plan.hint}
 	}
 	if !safeTime || latest.IsZero() {
 		return "", hint, false
@@ -175,10 +159,8 @@ func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, b
 // Only the observed migrated row vocabulary is accepted for interaction time.
 func knownMigratedTimeRow(version string, line rolloutLine) bool {
 	switch line.Type {
-	case "session_meta", "turn_context":
+	case "session_meta", "turn_context", "compacted":
 		return true
-	case "compacted":
-		return version == "0.117.0"
 	case "event_msg":
 		var event struct {
 			Type string          `json:"type"`
@@ -187,23 +169,19 @@ func knownMigratedTimeRow(version string, line rolloutLine) bool {
 		if json.Unmarshal(line.Payload, &event) != nil {
 			return false
 		}
-		switch event.Type {
-		case "task_started", "task_complete", "token_count", "turn_aborted":
-			return true
-		case "item_completed":
+		if !knownOlderTimeEventType(event.Type) {
+			return false
+		}
+		if event.Type == "item_completed" {
 			var item struct {
 				Type string `json:"type"`
 			}
 			if json.Unmarshal(event.Item, &item) != nil {
 				return false
 			}
-			switch item.Type {
-			case "UserMessage", "AgentMessage", "Reasoning":
-				return true
-			case "CommandExecution", "ContextCompaction", "FileChange", "McpToolCall", "Plan", "WebSearch":
-				return version == "0.117.0"
-			}
+			return knownOlderTimeItemType(item.Type) || item.Type == "Sleep" && version == "0.144.2"
 		}
+		return true
 	case "response_item":
 		var response struct {
 			Type string `json:"type"`
@@ -211,10 +189,7 @@ func knownMigratedTimeRow(version string, line rolloutLine) bool {
 		if json.Unmarshal(line.Payload, &response) != nil {
 			return false
 		}
-		switch response.Type {
-		case "custom_tool_call", "custom_tool_call_output", "function_call", "function_call_output", "message", "reasoning", "web_search_call":
-			return true
-		}
+		return knownOlderTimeResponseType(response.Type)
 	}
 	return false
 }

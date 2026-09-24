@@ -122,30 +122,12 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 	missingTimes := 0
 	for _, candidates := range discovered.byFingerprint {
 		selected, ambiguous := selectArtifact(candidates)
-		if ambiguous {
-			omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
-		}
-		itemSource, relationshipOmissions := makeSource(source, selected)
-		if selected.meta.HistoryBase != nil || selected.meta.SubagentHistoryStartOrdinal != nil {
-			itemSource.VersionHint = nil
-		}
-		if !ambiguous && supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode) {
-			value, hint, ok := readLastInteractionAt(source.Root, selected, discovered.byRollout)
-			if selected.meta.HistoryBase != nil || selected.meta.SubagentHistoryStartOrdinal != nil {
-				itemSource.VersionHint = hint
-			}
-			if ok {
-				itemSource.LastInteractionAt = &value
-			}
-		}
+		itemSource, sourceOmissions := observeArtifact(source, selected, ambiguous, discovered.byRollout)
 		if itemSource.LastInteractionAt == nil {
 			missingTimes++
 		}
 		sources = append(sources, itemSource)
-		omissions = append(omissions, relationshipOmissions...)
-		if !supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode) {
-			omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact format has not been verified for interaction time."))
-		}
+		omissions = append(omissions, sourceOmissions...)
 	}
 	if missingTimes > 0 {
 		omissions = append(omissions, contract.Omission{Code: "source_time_unavailable", Scope: "source", Count: missingTimes, Message: "A Codex source interaction time could not be established safely."})
@@ -168,31 +150,37 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 		return provider.SourceResult{Err: provider.ErrNotFound}
 	}
 	selected, ambiguous := selectArtifact(candidates)
-	omissions := []contract.Omission{}
-	if ambiguous {
-		omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
-	}
-	if !supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode) {
-		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact format has not been verified for interaction time."))
-	}
-	itemSource, relationshipOmissions := makeSource(source, selected)
-	if selected.meta.HistoryBase != nil || selected.meta.SubagentHistoryStartOrdinal != nil {
-		itemSource.VersionHint = nil
-	}
-	if !ambiguous && supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode) {
-		value, hint, ok := readLastInteractionAt(source.Root, selected, discovered.byRollout)
-		if selected.meta.HistoryBase != nil || selected.meta.SubagentHistoryStartOrdinal != nil {
-			itemSource.VersionHint = hint
-		}
-		if ok {
-			itemSource.LastInteractionAt = &value
-		}
-	}
+	itemSource, omissions := observeArtifact(source, selected, ambiguous, discovered.byRollout)
 	if itemSource.LastInteractionAt == nil {
 		omissions = append(omissions, omission("source_time_unavailable", "source", "A Codex source interaction time could not be established safely."))
 	}
-	omissions = append(omissions, relationshipOmissions...)
 	return provider.SourceResult{Status: statusFor(omissions), Sources: []contract.Source{itemSource}, Omissions: omissions}
+}
+
+func observeArtifact(source config.Source, selected artifact, ambiguous bool, byRollout map[string][]artifact) (contract.Source, []contract.Omission) {
+	itemSource, omissions := makeSource(source, selected)
+	logical := selected.meta.HistoryBase != nil || selected.meta.SubagentHistoryStartOrdinal != nil
+	if logical {
+		itemSource.VersionHint = nil
+	}
+	if ambiguous {
+		omissions = append([]contract.Omission{omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely.")}, omissions...)
+	}
+	supported := supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode)
+	if !supported {
+		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact format has not been verified for interaction time."))
+	}
+	if ambiguous || !supported {
+		return itemSource, omissions
+	}
+	value, hint, ok := readLastInteractionAt(source.Root, selected, byRollout)
+	if logical {
+		itemSource.VersionHint = hint
+	}
+	if ok {
+		itemSource.LastInteractionAt = &value
+	}
+	return itemSource, omissions
 }
 
 func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint string) provider.EventResult {
@@ -212,7 +200,7 @@ func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint st
 		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "events", "The effective Codex history could not be resolved safely."))}
 	}
 	normalizer := newEventNormalizer(selected.threadID)
-	plan, err := walkHistory(source.Root, spans, maxTimeHistoryBytes, maxTimeRowBytes, selectedProfile == profileCanonicalizedLegacyPaginated, normalizer.consume)
+	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, selectedProfile == profileCanonicalizedLegacyPaginated, normalizer.consume)
 	if err != nil {
 		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "events", "The effective Codex history could not be read safely."))}
 	}
@@ -246,9 +234,9 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 		return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "verification", "The effective Codex history could not be resolved safely."))}
 	}
 	formatOmissions := []contract.Omission{}
-	plan, err := walkHistory(source.Root, spans, maxTimeHistoryBytes, maxTimeRowBytes, compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode) == profileCanonicalizedLegacyPaginated, func(origin artifact, line rolloutLine) {
+	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode) == profileCanonicalizedLegacyPaginated, func(origin artifact, line rolloutLine) {
 		profile := compatibilityProfile(origin.meta.CLIVersion, origin.meta.HistoryMode)
-		if profile == profileUnsupported || !knownRowForProfile(profile, origin.meta.CLIVersion, line) {
+		if profile == profileUnsupported || !validRowForProfile(profile, origin.meta.CLIVersion, line) {
 			formatOmissions = append(formatOmissions, omission("unknown_format", "verification", "A Codex row was not recognized for its stored format."))
 		}
 	})
@@ -285,11 +273,6 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 		Chunks:    []contract.EvidenceChunk{{Name: "rollout/primary.jsonl", Content: data}},
 		Omissions: omissions,
 	}
-}
-
-func (a *Adapter) find(source config.Source, fingerprint string) (artifact, []contract.Omission, error) {
-	selected, _, omissions, err := a.findHistory(source, fingerprint)
-	return selected, omissions, err
 }
 
 func (a *Adapter) findHistory(source config.Source, fingerprint string) (artifact, discovery, []contract.Omission, error) {
@@ -581,42 +564,6 @@ func codexTextBlocks(raw json.RawMessage, textType string) (string, bool, bool, 
 		texts = append(texts, *block.Text)
 	}
 	return strings.Join(texts, "\n"), len(texts) > 0, omitted, false
-}
-
-func knownResponseType(value string) bool {
-	switch value {
-	case "message", "agent_message", "reasoning", "local_shell_call", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "tool_search_call", "tool_search_output", "web_search_call", "image_generation_call", "configuration_update", "compaction", "compaction_summary", "context_compaction":
-		return true
-	default:
-		return false
-	}
-}
-
-func knownTurnItemType(value string) bool {
-	switch value {
-	case "UserMessage", "FunctionCallOutput", "HookPrompt", "AgentMessage", "Plan", "Reasoning", "CommandExecution", "DynamicToolCall", "CollabAgentToolCall", "SubAgentActivity", "WebSearch", "ImageView", "Extension", "ImageGeneration", "EnteredReviewMode", "ExitedReviewMode", "FileChange", "McpToolCall", "ContextCompaction":
-		return true
-	default:
-		return false
-	}
-}
-
-func knownTopLevel(value string) bool {
-	switch value {
-	case "session_meta", "response_item", "event_msg", "inter_agent_communication", "inter_agent_communication_metadata", "compacted", "turn_context", "world_state", "security_risk_score":
-		return true
-	default:
-		return false
-	}
-}
-
-func knownEventType(value string) bool {
-	switch value {
-	case "user_message", "agent_message", "error", "item_completed", "task_started", "turn_started", "task_complete", "turn_complete", "turn_aborted", "token_count", "thread_rolled_back", "thread_settings_applied", "context_compacted", "agent_reasoning", "agent_reasoning_raw_content", "mcp_tool_call_end", "web_search_end", "image_generation_end", "entered_review_mode", "exited_review_mode", "sub_agent_activity":
-		return true
-	default:
-		return false
-	}
 }
 
 func messageEvent(role, text string) contract.Event {

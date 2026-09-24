@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/mtk177a/agent-sessions/internal/contract"
@@ -71,6 +72,34 @@ func TestInteractionTimeIsUnavailableForUnsafeCodexRows(t *testing.T) {
 				t.Fatalf("List() = %#v", listed)
 			}
 		})
+	}
+}
+
+func TestSkippedMalformedRowMakesInteractionTimeUnavailable(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.153.4", "legacy", ""),
+		`{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}`,
+		`{"timestamp":"2026-09-03T11:00:00Z","type":"event_msg","payload":`,
+	})
+
+	result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+	if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || !hasOmission(result.Omissions, "source_time_unavailable") {
+		t.Fatalf("Show() = %#v", result)
+	}
+}
+
+func TestSkippedOversizedRowMakesInteractionTimeUnavailable(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.153.4", "legacy", ""),
+		`{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}`,
+		`{"timestamp":"2026-09-03T11:00:00Z","type":"future","payload":{"value":"` + strings.Repeat("x", maxHistoryRowBytes) + `"}}`,
+	})
+
+	result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+	if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || !hasOmission(result.Omissions, "source_time_unavailable") {
+		t.Fatalf("Show() = %#v", result)
 	}
 }
 
@@ -278,6 +307,13 @@ func TestMigratedBookkeepingRowsRejectUnverifiedVersionsAndShapes(t *testing.T) 
 			result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
 			if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || !hasOmission(result.Omissions, "source_time_unavailable") {
 				t.Fatalf("Show() = %#v", result)
+			}
+			fingerprint := contract.SourceFingerprint(testThreadID)
+			if events := New().Events(context.Background(), testSource(home), fingerprint); events.Status == contract.StatusComplete || !hasOmission(events.Omissions, "unknown_format") {
+				t.Fatalf("Events() = %#v", events)
+			}
+			if evidence := New().Evidence(context.Background(), testSource(home), fingerprint); evidence.Status != contract.StatusPartial || !hasOmission(evidence.Omissions, "unknown_format") {
+				t.Fatalf("Evidence() = %#v", evidence)
 			}
 		})
 	}

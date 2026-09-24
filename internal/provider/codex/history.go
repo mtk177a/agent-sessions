@@ -17,7 +17,11 @@ import (
 	"github.com/mtk177a/agent-sessions/internal/safeio"
 )
 
-const maxHistorySegments = 32
+const (
+	maxHistorySegments       = 32
+	maxEffectiveHistoryBytes = 128 << 20
+	maxHistoryRowBytes       = 4 << 20
+)
 
 type historySpan struct {
 	item artifact

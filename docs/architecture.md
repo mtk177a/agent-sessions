@@ -247,7 +247,7 @@ A version hint is an optimization signal.\
 It is not durable cryptographic evidence.
 
 Each provider owns the meaning and independently versioned algorithm namespace of its hints.\
-Codex uses `v0` for current-artifact statistics and `v1` for included inherited content.\
+Codex uses `v0` for current-artifact statistics and `v2` for included inherited or sliced content.\
 Changing the public JSON schema version does not change an otherwise identical hint.
 
 ### Verified version

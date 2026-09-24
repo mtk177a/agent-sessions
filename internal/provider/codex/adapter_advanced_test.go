@@ -317,7 +317,7 @@ func TestOversizedRowDegradesEventsAndLargeArtifactStreamsVerification(t *testin
 	writeRollout(t, path, []string{
 		header(testThreadID, "0.149.1", "legacy", ""),
 		`{"type":"event_msg","payload":{"type":"user_message","message":"usable"}}`,
-		`{"type":"future","payload":{"value":"` + strings.Repeat("x", maxTimeRowBytes) + `"}}`,
+		`{"type":"future","payload":{"value":"` + strings.Repeat("x", maxHistoryRowBytes) + `"}}`,
 	})
 	result := eventsForOnlySource(t, home)
 	if result.Status != contract.StatusPartial || len(result.Events) != 1 || !hasOmission(result.Omissions, "resource_limit") {

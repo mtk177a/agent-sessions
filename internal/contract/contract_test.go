@@ -81,6 +81,15 @@ func TestVerifiedVersionReadersMatchesChunkEncoding(t *testing.T) {
 	if _, err := VerifiedVersionReaders([]EvidenceReader{{Name: "b", Reader: bytes.NewReader(nil)}, {Name: "a", Reader: bytes.NewReader(nil)}}, 32); err == nil {
 		t.Fatal("VerifiedVersionReaders accepted unordered chunks")
 	}
+	if _, err := VerifiedVersionReaders([]EvidenceReader{{Name: "../invalid", Reader: bytes.NewReader(nil)}}, 32); err == nil {
+		t.Fatal("VerifiedVersionReaders accepted an invalid chunk name")
+	}
+	if _, err := VerifiedVersionReaders([]EvidenceReader{{Name: "same", Reader: bytes.NewReader(nil)}, {Name: "same", Reader: bytes.NewReader(nil)}}, 32); err == nil {
+		t.Fatal("VerifiedVersionReaders accepted duplicate chunk names")
+	}
+	if _, err := VerifiedVersionReaders([]EvidenceReader{{Name: "large", Size: 2, Reader: bytes.NewReader([]byte("xx"))}}, 1); err == nil {
+		t.Fatal("VerifiedVersionReaders accepted evidence beyond the size limit")
+	}
 }
 
 func TestFinalizeRedactsEveryDynamicStringPosition(t *testing.T) {

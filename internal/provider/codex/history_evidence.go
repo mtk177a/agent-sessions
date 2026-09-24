@@ -26,7 +26,7 @@ func verifiedArtifact(root string, item artifact) (contract.VerifiedVersionID, e
 	if err != nil || before.Size() != item.size || !before.ModTime().Equal(item.modTime) {
 		return contract.VerifiedVersionID{}, errors.New("rollout changed before verification")
 	}
-	verified, err := contract.VerifiedVersionReader("rollout/primary.jsonl", uint64(item.size), file, uint64(maxTimeHistoryBytes))
+	verified, err := contract.VerifiedVersionReader("rollout/primary.jsonl", uint64(item.size), file, uint64(maxEffectiveHistoryBytes))
 	if err != nil {
 		return contract.VerifiedVersionID{}, err
 	}
@@ -69,7 +69,7 @@ func verifiedHistory(root string, plan historyPlan) (contract.VerifiedVersionID,
 		name := fmt.Sprintf("rollout/%03d-%s.jsonl", i, kind)
 		readers = append(readers, contract.EvidenceReader{Name: name, Size: span.end - span.start, Reader: io.NewSectionReader(file, int64(span.start), int64(span.end-span.start))})
 	}
-	verified, err := contract.VerifiedVersionReaders(readers, uint64(maxTimeHistoryBytes))
+	verified, err := contract.VerifiedVersionReaders(readers, uint64(maxEffectiveHistoryBytes))
 	if err != nil {
 		return contract.VerifiedVersionID{}, err
 	}

@@ -24,7 +24,7 @@ func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
 		n.omissions = append(n.omissions, omission("unsupported_format", "events", "The Codex artifact version and history mode have not been verified."))
 		return
 	}
-	if !knownRowForProfile(profile, origin.meta.CLIVersion, line) {
+	if !validRowForProfile(profile, origin.meta.CLIVersion, line) {
 		n.omissions = append(n.omissions, omission("unknown_format", "events", "A Codex JSONL row or payload type was not recognized for its stored format."))
 		return
 	}
@@ -174,47 +174,4 @@ func (n *eventNormalizer) finish() ([]contract.Event, []contract.Omission) {
 		n.omissions = append(n.omissions, omission("resource_limit", "events", "The normalized event count exceeded the input limit."))
 	}
 	return n.events, n.omissions
-}
-
-func knownRowForProfile(profile storageProfile, version string, line rolloutLine) bool {
-	if line.Type == "token_usage_record" {
-		return supportsTokenUsageRecord(version) || profile == profileCanonicalizedLegacyPaginated
-	}
-	if !knownTopLevel(line.Type) {
-		return false
-	}
-	if line.Type == "event_msg" {
-		var event struct {
-			Type string          `json:"type"`
-			Item json.RawMessage `json:"item"`
-		}
-		if json.Unmarshal(line.Payload, &event) != nil || !knownEventType(event.Type) {
-			return false
-		}
-		if profile == profileCanonicalizedLegacyPaginated && !knownOlderTimeEventType(event.Type) {
-			return false
-		}
-		if event.Type == "item_completed" {
-			var item struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal(event.Item, &item) != nil {
-				return false
-			}
-			if profile == profileCanonicalizedLegacyPaginated {
-				return knownOlderTimeItemType(item.Type) || item.Type == "Sleep" && version == "0.144.2"
-			}
-			return knownTurnItemType(item.Type)
-		}
-	}
-	if line.Type == "response_item" {
-		var response struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(line.Payload, &response) != nil || !knownResponseType(response.Type) {
-			return false
-		}
-		return profile != profileCanonicalizedLegacyPaginated || knownOlderTimeResponseType(response.Type)
-	}
-	return true
 }

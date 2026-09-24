@@ -257,7 +257,7 @@ func TestHistoryReaderUsesCallerLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, limits := range [][2]int64{{1, maxTimeRowBytes}, {maxTimeHistoryBytes, 64}} {
+	for _, limits := range [][2]int64{{1, maxHistoryRowBytes}, {maxEffectiveHistoryBytes, 64}} {
 		if _, err := walkHistory(home, spans, limits[0], limits[1], false, func(artifact, rolloutLine) {}); err == nil {
 			t.Fatalf("walkHistory succeeded with limits %v", limits)
 		}

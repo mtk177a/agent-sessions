@@ -70,7 +70,8 @@ Completed `FileChange` and `CollabAgentToolCall` items are tool interactions, an
 Completed `Extension` items with verified `web.search` or `clock.sleep` kinds are tool interactions; other extension kinds remain uncertain.\
 Completed `WebSearch` items, verified raw `web_search_call` and `tool_search_call` rows, and `tool_search_output` results also advance time; when raw and completed rows describe one operation, the time calculation still takes only the maximum timestamp.\
 The `0.144.2` completed `Sleep` item is a tool interaction.\
-For migrated `0.98.0` and `0.117.0` rollouts, only the observed message, tool, search, and bookkeeping row types are classified; completed `Reasoning`, `Plan`, and `ContextCompaction` and the `compacted` envelope do not advance time.\
+For canonicalized legacy paginated rollouts, only the observed message, tool, search, and bookkeeping row types are classified; completed `Reasoning`, `Plan`, and `ContextCompaction` and the `compacted` envelope do not advance time.\
+Verified `world_state` snapshots in `0.139.0`, `0.142.5`, and `0.144.2`, `token_usage_record` accounting in `0.142.5`, and `inter_agent_communication_metadata` in `0.144.2` are bookkeeping rows and do not advance time.\
 Later token accounting, lifecycle events, and provider errors do not advance it.\
 For `history_base`, the adapter follows the referenced rollout ID and reads only the inherited prefix ending at the recorded ordinal and byte offset.\
 For `subagent_history_start_ordinal`, it excludes copied parent rows and retains only the selected child session's rows.\

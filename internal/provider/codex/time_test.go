@@ -221,6 +221,68 @@ func TestMigratedOlderRolloutsExposeInteractionTimeAndVerifiedFormat(t *testing.
 	}
 }
 
+func TestMigratedBookkeepingRowsDoNotAdvanceInteractionTime(t *testing.T) {
+	for _, tc := range []struct {
+		name, version, row string
+	}{
+		{"world_state", "0.139.0", `{"timestamp":"2026-09-03T11:00:00Z","type":"world_state","payload":{"full":true,"state":{"model":"fictional"}}}`},
+		{"token_usage_record", "0.142.5", `{"timestamp":"2026-09-03T11:00:00Z","type":"token_usage_record","payload":{"thread_id":"fictional-thread","turn_id":"fictional-turn","session_id":"fictional-session","root_turn_id":"fictional-root-turn","response_id":"fictional-response","usage":{},"turn_token_usage":{},"thread_token_usage":{}}}`},
+		{"inter_agent_communication_metadata", "0.144.2", `{"timestamp":"2026-09-03T11:00:00Z","type":"inter_agent_communication_metadata","payload":{"trigger_turn":false}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+				withOrdinal(0, header(testThreadID, tc.version, "paginated", "")),
+				withOrdinal(1, `{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"fictional-message","content":[{"type":"text","text":"hello"}]}}}`),
+				withOrdinal(2, tc.row),
+			})
+			result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+			if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt == nil || *result.Sources[0].LastInteractionAt != "2026-09-03T10:00:00Z" || hasOmission(result.Omissions, "source_time_unavailable") {
+				t.Fatalf("Show() = %#v", result)
+			}
+			fingerprint := contract.SourceFingerprint(testThreadID)
+			if events := New().Events(context.Background(), testSource(home), fingerprint); events.Status != contract.StatusComplete || len(events.Events) != 1 || events.Events[0].Message == nil {
+				t.Fatalf("Events() = %#v", events)
+			}
+			if evidence := New().Evidence(context.Background(), testSource(home), fingerprint); evidence.Status != contract.StatusComplete {
+				t.Fatalf("Evidence() = %#v", evidence)
+			}
+		})
+	}
+}
+
+func TestMigratedBookkeepingRowsRejectUnverifiedVersionsAndShapes(t *testing.T) {
+	validTokenUsage := `{"thread_id":"fictional-thread","turn_id":"fictional-turn","session_id":"fictional-session","root_turn_id":"fictional-root-turn","response_id":"fictional-response","usage":{},"turn_token_usage":{},"thread_token_usage":{}}`
+	for _, tc := range []struct {
+		name, version, row string
+	}{
+		{"world_state_unverified_version", "0.117.0", `{"type":"world_state","payload":{"full":true,"state":{}}}`},
+		{"world_state_missing_full", "0.139.0", `{"type":"world_state","payload":{"state":{}}}`},
+		{"world_state_non_object_state", "0.142.5", `{"type":"world_state","payload":{"full":true,"state":[]}}`},
+		{"world_state_extra_field", "0.144.2", `{"type":"world_state","payload":{"full":true,"state":{},"future":true}}`},
+		{"metadata_unverified_version", "0.142.5", `{"type":"inter_agent_communication_metadata","payload":{"trigger_turn":false}}`},
+		{"metadata_missing_trigger", "0.144.2", `{"type":"inter_agent_communication_metadata","payload":{}}`},
+		{"metadata_extra_field", "0.144.2", `{"type":"inter_agent_communication_metadata","payload":{"trigger_turn":false,"future":true}}`},
+		{"token_usage_unverified_version", "0.139.0", `{"type":"token_usage_record","payload":` + validTokenUsage + `}`},
+		{"token_usage_empty_id", "0.142.5", `{"type":"token_usage_record","payload":{"thread_id":"","turn_id":"fictional-turn","session_id":"fictional-session","root_turn_id":"fictional-root-turn","response_id":"fictional-response","usage":{},"turn_token_usage":{},"thread_token_usage":{}}}`},
+		{"token_usage_non_object_usage", "0.142.5", `{"type":"token_usage_record","payload":{"thread_id":"fictional-thread","turn_id":"fictional-turn","session_id":"fictional-session","root_turn_id":"fictional-root-turn","response_id":"fictional-response","usage":[],"turn_token_usage":{},"thread_token_usage":{}}}`},
+		{"token_usage_extra_field", "0.142.5", `{"type":"token_usage_record","payload":{"thread_id":"fictional-thread","turn_id":"fictional-turn","session_id":"fictional-session","root_turn_id":"fictional-root-turn","response_id":"fictional-response","usage":{},"turn_token_usage":{},"thread_token_usage":{},"future":true}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+				withOrdinal(0, header(testThreadID, tc.version, "paginated", "")),
+				withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+				withOrdinal(2, tc.row),
+			})
+			result := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+			if len(result.Sources) != 1 || result.Sources[0].LastInteractionAt != nil || !hasOmission(result.Omissions, "source_time_unavailable") {
+				t.Fatalf("Show() = %#v", result)
+			}
+		})
+	}
+}
+
 func TestMigratedOlderRolloutsRejectUnverifiedShapeAndRows(t *testing.T) {
 	for _, tc := range []struct {
 		name, version string

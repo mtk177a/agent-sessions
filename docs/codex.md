@@ -47,7 +47,7 @@ An unrecognized row, an unsupported history mode, or invalid ordinals leaves the
 
 Interaction-time decoding additionally accepts syntactically valid versions at or after `0.155.0` when every included rollout matches the known `legacy` or native `paginated` structure.\
 This forward-compatible boundary has no version ceiling: future paginated records require contiguous ordinals and every included row must match the known message, tool, response, lifecycle, or bookkeeping shape.\
-Known completed interaction items must retain the required top-level fields and JSON types of the known item structure.\
+Known event and response rows that can advance interaction time must retain the required top-level fields and JSON types of the known structure; additional fields remain allowed.\
 Unknown rows or variants, malformed required bookkeeping fields, and future changes that do not preserve those structures leave the source time unavailable.\
 This structural compatibility applies only to `list` and `show`; `events` and `verify` retain the verified version list above.
 

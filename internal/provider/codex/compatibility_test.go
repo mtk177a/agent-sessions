@@ -79,12 +79,13 @@ func TestFutureCodexVersionUsesStructurallyCompatibleTimeProfile(t *testing.T) {
 		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
 		withOrdinal(2, completedMessage("2026-09-03T11:00:00Z", "AgentMessage")),
 		withOrdinal(3, `{"timestamp":"2026-09-03T12:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"fictional-command","command":[],"cwd":"file:///fictional","parsed_cmd":[],"source":"agent","status":"completed"}}}`),
+		withOrdinal(4, `{"timestamp":"2026-09-03T13:00:00Z","type":"response_item","payload":{"type":"function_call","name":"fictional","arguments":"{}","call_id":"fictional-call","future_field":true}}`),
 	})
 	adapter := New()
 	source := testSource(home)
 	fingerprint := contract.SourceFingerprint(testThreadID)
 	shown := adapter.Show(context.Background(), source, fingerprint)
-	if shown.Status != contract.StatusComplete || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T12:00:00Z" || hasOmission(shown.Omissions, "unsupported_format") {
+	if shown.Status != contract.StatusComplete || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T13:00:00Z" || hasOmission(shown.Omissions, "unsupported_format") {
 		t.Fatalf("Show() = %#v", shown)
 	}
 	if events := adapter.Events(context.Background(), source, fingerprint); !hasOmission(events.Omissions, "unsupported_format") {
@@ -115,6 +116,19 @@ func TestFutureCodexVersionRejectsIncompleteInteractionItems(t *testing.T) {
 				t.Fatalf("Show() = %#v", shown)
 			}
 		})
+	}
+}
+
+func TestFutureCodexVersionRejectsIncompleteResponseInteraction(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		withOrdinal(0, header(testThreadID, "0.155.1", "paginated", "")),
+		withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "UserMessage")),
+		withOrdinal(2, `{"timestamp":"2026-09-03T11:00:00Z","type":"response_item","payload":{"type":"function_call"}}`),
+	})
+	shown := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+	if shown.Status != contract.StatusPartial || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt != nil || !hasOmission(shown.Omissions, "source_time_unavailable") {
+		t.Fatalf("Show() = %#v", shown)
 	}
 }
 
@@ -163,6 +177,18 @@ func TestFutureCodexLegacyVersionUsesKnownInteractionRows(t *testing.T) {
 	})
 	shown := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
 	if shown.Status != contract.StatusComplete || shown.Sources[0].LastInteractionAt == nil || *shown.Sources[0].LastInteractionAt != "2026-09-03T11:00:00Z" {
+		t.Fatalf("Show() = %#v", shown)
+	}
+}
+
+func TestFutureCodexLegacyVersionRejectsIncompleteMessageEvent(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "9.0.0", "legacy", ""),
+		`{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"user_message"}}`,
+	})
+	shown := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+	if shown.Status != contract.StatusPartial || len(shown.Sources) != 1 || shown.Sources[0].LastInteractionAt != nil || !hasOmission(shown.Omissions, "source_time_unavailable") {
 		t.Fatalf("Show() = %#v", shown)
 	}
 }

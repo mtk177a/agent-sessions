@@ -29,6 +29,9 @@ func validRowForProfile(profile storageProfile, version string, line rolloutLine
 		if json.Unmarshal(line.Payload, &event) != nil || !knownEventType(event.Type) {
 			return false
 		}
+		if forward && !validForwardEvent(line.Payload, event.Type) {
+			return false
+		}
 		if event.Type == "item_completed" {
 			var item struct {
 				Type string `json:"type"`
@@ -43,9 +46,25 @@ func validRowForProfile(profile storageProfile, version string, line rolloutLine
 		var response struct {
 			Type string `json:"type"`
 		}
-		return json.Unmarshal(line.Payload, &response) == nil && knownResponseType(response.Type)
+		if json.Unmarshal(line.Payload, &response) != nil || !knownResponseType(response.Type) {
+			return false
+		}
+		return !forward || validForwardResponseItem(line.Payload, response.Type)
 	}
 	return true
+}
+
+func validForwardEvent(raw json.RawMessage, eventType string) bool {
+	fields, ok := jsonObjectFields(raw)
+	if !ok {
+		return false
+	}
+	switch eventType {
+	case "user_message", "agent_message":
+		return hasRequiredFields(fields, "message") && jsonString(fields["message"])
+	default:
+		return true
+	}
 }
 
 func validForwardCompletedItem(raw json.RawMessage, itemType string) bool {
@@ -79,9 +98,56 @@ func validForwardCompletedItem(raw json.RawMessage, itemType string) bool {
 	case "McpToolCall":
 		return id() && required("server", "tool", "arguments", "status") && jsonString(fields["server"]) && jsonString(fields["tool"]) &&
 			jsonStringIn(fields["status"], "inProgress", "completed", "failed")
+	case "Extension":
+		return id() && required("kind") && jsonString(fields["kind"])
 	default:
 		return true
 	}
+}
+
+func validForwardResponseItem(raw json.RawMessage, itemType string) bool {
+	fields, ok := jsonObjectFields(raw)
+	if !ok {
+		return false
+	}
+	required := func(names ...string) bool { return hasRequiredFields(fields, names...) }
+	switch itemType {
+	case "message":
+		return required("role", "content") && jsonString(fields["role"]) && jsonArray(fields["content"])
+	case "agent_message":
+		return required("author", "recipient", "content") && jsonString(fields["author"]) &&
+			jsonString(fields["recipient"]) && jsonArray(fields["content"])
+	case "local_shell_call":
+		return required("status", "action") &&
+			jsonStringIn(fields["status"], "completed", "in_progress", "incomplete") &&
+			validForwardLocalShellAction(fields["action"])
+	case "function_call":
+		return required("name", "arguments", "call_id") && jsonString(fields["name"]) &&
+			jsonString(fields["arguments"]) && jsonString(fields["call_id"])
+	case "function_call_output":
+		return required("output") && jsonStringOrArray(fields["output"])
+	case "custom_tool_call":
+		return required("call_id", "name", "input") && jsonString(fields["call_id"]) &&
+			jsonString(fields["name"]) && jsonString(fields["input"])
+	case "custom_tool_call_output":
+		return required("call_id", "output") && jsonString(fields["call_id"]) &&
+			jsonStringOrArray(fields["output"])
+	case "tool_search_call":
+		return required("execution", "arguments") && jsonString(fields["execution"])
+	case "tool_search_output":
+		return required("status", "execution", "tools") && jsonString(fields["status"]) &&
+			jsonString(fields["execution"]) && jsonArray(fields["tools"])
+	case "web_search_call":
+		return jsonOptionalString(fields, "status") && jsonOptionalObjectWithStringField(fields, "action", "type")
+	default:
+		return true
+	}
+}
+
+func validForwardLocalShellAction(raw json.RawMessage) bool {
+	fields, ok := jsonObjectFields(raw)
+	return ok && hasRequiredFields(fields, "type", "command") &&
+		jsonStringIn(fields["type"], "exec") && jsonArray(fields["command"])
 }
 
 func isForwardBookkeepingType(value string) bool {
@@ -248,6 +314,21 @@ func jsonArray(raw json.RawMessage) bool {
 
 func jsonStringOrArray(raw json.RawMessage) bool {
 	return jsonString(raw) || jsonArray(raw)
+}
+
+func jsonOptionalString(fields map[string]json.RawMessage, name string) bool {
+	raw, ok := fields[name]
+	return !ok || jsonNull(raw) || jsonString(raw)
+}
+
+func jsonOptionalObjectWithStringField(fields map[string]json.RawMessage, name, field string) bool {
+	raw, ok := fields[name]
+	return !ok || jsonNull(raw) || jsonObjectWithStringField(raw, field)
+}
+
+func jsonNull(raw json.RawMessage) bool {
+	var value any
+	return json.Unmarshal(raw, &value) == nil && value == nil
 }
 
 func jsonObjectWithStringField(raw json.RawMessage, name string) bool {

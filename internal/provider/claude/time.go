@@ -28,7 +28,7 @@ func readLastInteractionAt(root string, item artifact) (string, bool) {
 				return "", false
 			}
 		}
-		if row.Version != "" && !isSupportedVersion(row.Version) {
+		if row.Version != "" && !supportsInteractionTimeVersion(row.Version) {
 			return "", false
 		}
 		activity, safe := claudeInteractionRow(row)
@@ -64,9 +64,23 @@ func claudeInteractionRow(row transcriptRow) (bool, bool) {
 	}
 	switch row.Type {
 	case "system":
-		return false, row.Subtype == "turn_duration" || row.Subtype == "compact_boundary"
+		if row.Subtype == "turn_duration" || row.Subtype == "compact_boundary" {
+			return false, true
+		}
+		return false, row.Subtype == "away_summary" || row.Subtype == "informational"
 	case "attachment":
-		return false, false
+		var attachment struct {
+			Type string `json:"type"`
+		}
+		if len(row.Attachment) == 0 || safeio.DecodeJSON(row.Attachment, contract.MaxJSONDepth, &attachment) != nil {
+			return false, false
+		}
+		switch attachment.Type {
+		case "agent_listing_delta", "command_permissions", "deferred_tools_delta", "diagnostics", "edited_text_file", "opened_file_in_ide", "plan_mode", "plan_mode_exit", "selected_lines_in_ide", "skill_listing", "task_reminder":
+			return false, true
+		default:
+			return false, false
+		}
 	case "user":
 		if row.IsMeta {
 			return false, true

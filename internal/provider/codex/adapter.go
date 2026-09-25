@@ -28,7 +28,6 @@ const (
 	maxDiscoveredFiles  = 100_000
 	maxArtifactBytes    = int64(contract.MaxEvidenceBytes)
 	maxHeaderBytes      = 1 << 20
-	maxRowBytes         = 1 << 20
 	maxNormalizedEvents = 100_000
 )
 
@@ -52,20 +51,24 @@ type artifact struct {
 }
 
 type sessionMeta struct {
-	SessionID      string           `json:"session_id"`
-	ID             string           `json:"id"`
-	ForkedFromID   string           `json:"forked_from_id"`
-	ParentThreadID string           `json:"parent_thread_id"`
-	CLIVersion     string           `json:"cli_version"`
-	HistoryMode    string           `json:"history_mode"`
-	HistoryBase    *historyPosition `json:"history_base"`
+	SessionID                   string           `json:"session_id"`
+	ID                          string           `json:"id"`
+	ForkedFromID                string           `json:"forked_from_id"`
+	ParentThreadID              string           `json:"parent_thread_id"`
+	CLIVersion                  string           `json:"cli_version"`
+	HistoryMode                 string           `json:"history_mode"`
+	HistoryBase                 *historyPosition `json:"history_base"`
+	SubagentHistoryStartOrdinal *uint64          `json:"subagent_history_start_ordinal"`
 }
 
 type historyPosition struct {
-	ThreadID string `json:"thread_id"`
+	ThreadID            string `json:"thread_id"`
+	EndOrdinalExclusive uint64 `json:"end_ordinal_exclusive"`
+	EndByteOffset       uint64 `json:"end_byte_offset"`
 }
 
 type rolloutLine struct {
+	Ordinal   *uint64         `json:"ordinal"`
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
 	Payload   json.RawMessage `json:"payload"`
@@ -88,6 +91,7 @@ type completedItem struct {
 
 type discovery struct {
 	byFingerprint map[string][]artifact
+	byRollout     map[string][]artifact
 	omissions     []contract.Omission
 }
 
@@ -118,23 +122,12 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 	missingTimes := 0
 	for _, candidates := range discovered.byFingerprint {
 		selected, ambiguous := selectArtifact(candidates)
-		if ambiguous {
-			omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
-		}
-		itemSource, relationshipOmissions := makeSource(source, selected)
-		if !ambiguous && isSupportedVersion(selected.meta.CLIVersion) {
-			if value, ok := readLastInteractionAt(source.Root, selected); ok {
-				itemSource.LastInteractionAt = &value
-			}
-		}
+		itemSource, sourceOmissions := observeArtifact(source, selected, ambiguous, discovered.byRollout)
 		if itemSource.LastInteractionAt == nil {
 			missingTimes++
 		}
 		sources = append(sources, itemSource)
-		omissions = append(omissions, relationshipOmissions...)
-		if !isSupportedVersion(selected.meta.CLIVersion) {
-			omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
-		}
+		omissions = append(omissions, sourceOmissions...)
 	}
 	if missingTimes > 0 {
 		omissions = append(omissions, contract.Omission{Code: "source_time_unavailable", Scope: "source", Count: missingTimes, Message: "A Codex source interaction time could not be established safely."})
@@ -157,28 +150,41 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 		return provider.SourceResult{Err: provider.ErrNotFound}
 	}
 	selected, ambiguous := selectArtifact(candidates)
-	omissions := []contract.Omission{}
-	if ambiguous {
-		omissions = append(omissions, omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely."))
-	}
-	if !isSupportedVersion(selected.meta.CLIVersion) {
-		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
-	}
-	itemSource, relationshipOmissions := makeSource(source, selected)
-	if !ambiguous && isSupportedVersion(selected.meta.CLIVersion) {
-		if value, ok := readLastInteractionAt(source.Root, selected); ok {
-			itemSource.LastInteractionAt = &value
-		}
-	}
+	itemSource, omissions := observeArtifact(source, selected, ambiguous, discovered.byRollout)
 	if itemSource.LastInteractionAt == nil {
 		omissions = append(omissions, omission("source_time_unavailable", "source", "A Codex source interaction time could not be established safely."))
 	}
-	omissions = append(omissions, relationshipOmissions...)
 	return provider.SourceResult{Status: statusFor(omissions), Sources: []contract.Source{itemSource}, Omissions: omissions}
 }
 
+func observeArtifact(source config.Source, selected artifact, ambiguous bool, byRollout map[string][]artifact) (contract.Source, []contract.Omission) {
+	itemSource, omissions := makeSource(source, selected)
+	logical := selected.meta.HistoryBase != nil || selected.meta.SubagentHistoryStartOrdinal != nil
+	if logical {
+		itemSource.VersionHint = nil
+	}
+	if ambiguous {
+		omissions = append([]contract.Omission{omission("ambiguous_artifact", "source", "Multiple current artifacts could not be distinguished safely.")}, omissions...)
+	}
+	supported := supportsInteractionTime(selected.meta.CLIVersion, selected.meta.HistoryMode)
+	if !supported {
+		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact format has not been verified for interaction time."))
+	}
+	if ambiguous || !supported {
+		return itemSource, omissions
+	}
+	value, hint, ok := readLastInteractionAt(source.Root, selected, byRollout)
+	if logical {
+		itemSource.VersionHint = hint
+	}
+	if ok {
+		itemSource.LastInteractionAt = &value
+	}
+	return itemSource, omissions
+}
+
 func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint string) provider.EventResult {
-	selected, omissions, err := a.find(source, fingerprint)
+	selected, discovered, omissions, err := a.findHistory(source, fingerprint)
 	if err != nil {
 		if errors.Is(err, errAmbiguousArtifact) {
 			return provider.EventResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("ambiguous_artifact", "events", "Multiple current artifacts could not be distinguished safely.")}}
@@ -188,14 +194,23 @@ func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint st
 	if selected.compressed {
 		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("unsupported_compression", "events", "Compressed Codex rollout artifacts are not supported.")}}
 	}
-	data, err := safeio.ReadFileWithin(source.Root, selected.relative, maxArtifactBytes)
+	selectedProfile := compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode)
+	spans, err := resolveHistory(selected, discovered.byRollout)
 	if err != nil {
-		return provider.EventResult{Err: err}
+		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "events", "The effective Codex history could not be resolved safely."))}
 	}
-	events, rowOmissions := normalizeRowsVersion(selected.threadID, selected.meta.HistoryMode, selected.meta.CLIVersion, data)
+	normalizer := newEventNormalizer(selected.threadID)
+	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, selectedProfile == profileCanonicalizedLegacyPaginated, normalizer.consume)
+	if err != nil {
+		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "events", "The effective Codex history could not be read safely."))}
+	}
+	events, rowOmissions := normalizer.finish()
 	omissions = append(omissions, rowOmissions...)
-	if selected.meta.HistoryBase != nil {
-		omissions = append(omissions, omission("unsupported_format", "events", "Referenced rollout history is not included in this observation."))
+	if plan.malformedRows > 0 {
+		omissions = append(omissions, omission("malformed_record", "events", "A Codex JSONL row could not be decoded."))
+	}
+	if plan.oversizedRows > 0 {
+		omissions = append(omissions, omission("resource_limit", "events", "A Codex JSONL row exceeded the input limit."))
 	}
 	if len(events) == 0 && len(omissions) > 0 {
 		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: omissions}
@@ -204,7 +219,7 @@ func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint st
 }
 
 func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint string) provider.EvidenceResult {
-	selected, omissions, err := a.find(source, fingerprint)
+	selected, discovered, omissions, err := a.findHistory(source, fingerprint)
 	if err != nil {
 		if errors.Is(err, errAmbiguousArtifact) {
 			return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("ambiguous_artifact", "verification", "Multiple current artifacts could not be distinguished safely.")}}
@@ -214,14 +229,44 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 	if selected.compressed {
 		return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("unsupported_compression", "verification", "Compressed Codex rollout artifacts are not supported.")}}
 	}
+	spans, err := resolveHistory(selected, discovered.byRollout)
+	if err != nil {
+		return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "verification", "The effective Codex history could not be resolved safely."))}
+	}
+	formatOmissions := []contract.Omission{}
+	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode) == profileCanonicalizedLegacyPaginated, func(origin artifact, line rolloutLine) {
+		profile := compatibilityProfile(origin.meta.CLIVersion, origin.meta.HistoryMode)
+		if profile == profileUnsupported || !validRowForProfile(profile, origin.meta.CLIVersion, line, false) {
+			formatOmissions = append(formatOmissions, omission("unknown_format", "verification", "A Codex row was not recognized for its stored format."))
+		}
+	})
+	if err != nil {
+		return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "verification", "The effective Codex history could not be read safely."))}
+	}
+	omissions = append(omissions, formatOmissions...)
+	if plan.malformedRows > 0 {
+		omissions = append(omissions, omission("malformed_record", "verification", "A Codex JSONL row could not be decoded."))
+	}
+	if plan.oversizedRows > 0 {
+		omissions = append(omissions, omission("resource_limit", "verification", "A Codex JSONL row exceeded the input limit."))
+	}
+	if plan.logical {
+		verified, err := verifiedHistory(source.Root, plan)
+		if err != nil {
+			return provider.EvidenceResult{Err: err}
+		}
+		return provider.EvidenceResult{Status: statusFor(omissions), VerifiedVersion: &verified, Omissions: omissions}
+	}
+	if selected.size > maxArtifactBytes {
+		verified, err := verifiedArtifact(source.Root, selected)
+		if err != nil {
+			return provider.EvidenceResult{Err: err}
+		}
+		return provider.EvidenceResult{Status: statusFor(omissions), VerifiedVersion: &verified, Omissions: omissions}
+	}
 	data, err := safeio.ReadFileWithin(source.Root, selected.relative, maxArtifactBytes)
 	if err != nil {
 		return provider.EvidenceResult{Err: err}
-	}
-	_, formatOmissions := inspectRowsVersion(selected.meta.HistoryMode, selected.meta.CLIVersion, data)
-	omissions = append(omissions, formatOmissions...)
-	if selected.meta.HistoryBase != nil {
-		omissions = append(omissions, omission("unsupported_format", "verification", "Referenced rollout history is not included in this verification."))
 	}
 	return provider.EvidenceResult{
 		Status:    statusFor(omissions),
@@ -230,28 +275,28 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 	}
 }
 
-func (a *Adapter) find(source config.Source, fingerprint string) (artifact, []contract.Omission, error) {
+func (a *Adapter) findHistory(source config.Source, fingerprint string) (artifact, discovery, []contract.Omission, error) {
 	discovered, err := a.discover(source)
 	if err != nil {
-		return artifact{}, nil, err
+		return artifact{}, discovery{}, nil, err
 	}
 	candidates, ok := discovered.byFingerprint[fingerprint]
 	if !ok {
-		return artifact{}, nil, provider.ErrNotFound
+		return artifact{}, discovery{}, nil, provider.ErrNotFound
 	}
 	selected, ambiguous := selectArtifact(candidates)
 	omissions := []contract.Omission{}
 	if ambiguous {
-		return artifact{}, nil, errAmbiguousArtifact
+		return artifact{}, discovery{}, nil, errAmbiguousArtifact
 	}
-	if !isSupportedVersion(selected.meta.CLIVersion) {
+	if compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode) == profileUnsupported {
 		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
 	}
-	return selected, omissions, nil
+	return selected, discovered, omissions, nil
 }
 
 func (a *Adapter) discover(source config.Source) (discovery, error) {
-	result := discovery{byFingerprint: map[string][]artifact{}, omissions: []contract.Omission{}}
+	result := discovery{byFingerprint: map[string][]artifact{}, byRollout: map[string][]artifact{}, omissions: []contract.Omission{}}
 	discoveredFiles := 0
 	for _, collection := range []string{"sessions", "archived_sessions"} {
 		remaining := maxDiscoveredFiles - discoveredFiles
@@ -301,6 +346,7 @@ func (a *Adapter) discover(source config.Source) (discovery, error) {
 			item := artifact{relative: entry.Relative, collection: collection, size: entry.Size, modTime: entry.ModTime, threadID: strings.ToLower(meta.ID), rolloutID: strings.ToLower(rolloutID), timestamp: timestamp, meta: meta}
 			fingerprint := contract.SourceFingerprint(item.threadID)
 			result.byFingerprint[fingerprint] = append(result.byFingerprint[fingerprint], item)
+			result.byRollout[item.rolloutID] = append(result.byRollout[item.rolloutID], item)
 		}
 	}
 	return result, nil
@@ -333,6 +379,9 @@ func readSessionMeta(root, relative string) (sessionMeta, error) {
 	}
 	if meta.HistoryMode != "legacy" && meta.HistoryMode != "paginated" {
 		return sessionMeta{}, errors.New("unsupported history mode")
+	}
+	if meta.SubagentHistoryStartOrdinal != nil && meta.HistoryMode != "paginated" {
+		return sessionMeta{}, errors.New("subagent history boundary requires paginated history")
 	}
 	return meta, nil
 }
@@ -397,154 +446,6 @@ func canonicalThreadID(value string) (string, bool) {
 		return "", false
 	}
 	return strings.ToLower(value), true
-}
-
-func normalizeRows(threadID, historyMode string, data []byte) ([]contract.Event, []contract.Omission) {
-	return normalizeRowsVersion(threadID, historyMode, supportedVersion, data)
-}
-
-func normalizeRowsVersion(threadID, historyMode, version string, data []byte) ([]contract.Event, []contract.Omission) {
-	lines, omissions := inspectRowsVersion(historyMode, version, data)
-	events := []contract.Event{}
-	calls := map[string]string{}
-	completedItems := map[string]struct{}{}
-	for _, line := range lines {
-		switch line.Type {
-		case "event_msg":
-			var event struct {
-				Type    string          `json:"type"`
-				Message string          `json:"message"`
-				Item    json.RawMessage `json:"item"`
-			}
-			if json.Unmarshal(line.Payload, &event) != nil {
-				continue
-			}
-			switch event.Type {
-			case "user_message":
-				if historyMode == "legacy" {
-					events = append(events, messageEvent("user", event.Message))
-				}
-			case "agent_message":
-				if historyMode == "legacy" {
-					events = append(events, messageEvent("assistant", event.Message))
-				}
-			case "error":
-				events = append(events, contract.Event{Kind: contract.EventError, Error: &contract.ErrorEvent{Category: "provider", Message: event.Message}, Metadata: []contract.Metadata{}})
-			case "item_completed":
-				if historyMode == "paginated" {
-					var item completedItem
-					if json.Unmarshal(event.Item, &item) != nil {
-						omissions = append(omissions, omission("malformed_record", "events", "A completed Codex item could not be decoded."))
-						continue
-					}
-					switch item.Type {
-					case "UserMessage":
-						text, hasText, contentOmission := normalizeUserContent(item.Content)
-						if hasText {
-							events = append(events, messageEvent("user", text))
-						}
-						if contentOmission != "" {
-							message := "A message contained content that is not represented by the public text model."
-							if contentOmission == "unknown_format" {
-								message = "A message content type was not recognized."
-							}
-							omissions = append(omissions, omission(contentOmission, "events", message))
-						}
-					case "AgentMessage":
-						text, validContent := normalizeAgentContent(item.Content)
-						if validContent {
-							events = append(events, messageEvent("assistant", text))
-						} else {
-							omissions = append(omissions, omission("unknown_format", "events", "An assistant message content type was not recognized."))
-						}
-					case "CommandExecution", "McpToolCall", "DynamicToolCall":
-						if item.ID == "" {
-							omissions = append(omissions, omission("correlation_omitted", "events", "A completed tool item lacked a correlation identifier."))
-							continue
-						}
-						if _, duplicate := completedItems[item.ID]; duplicate {
-							omissions = append(omissions, omission("duplicate_call_id", "events", "A completed provider tool identifier was duplicated."))
-							continue
-						}
-						completedItems[item.ID] = struct{}{}
-						category := map[string]string{"CommandExecution": "shell", "McpToolCall": "mcp", "DynamicToolCall": "tool"}[item.Type]
-						callID := normalizedCallID(threadID, item.ID)
-						action := "invoke"
-						if item.Type == "CommandExecution" {
-							action = "execute"
-						}
-						events = append(events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}})
-						success := item.Status == "completed" || item.ExitCode != nil && *item.ExitCode == 0
-						toolResult := codexToolResult(item, callID, success)
-						events = append(events, contract.Event{Kind: contract.EventToolResult, ToolResult: &toolResult, Metadata: []contract.Metadata{}})
-						omissions = append(omissions, contract.ToolResultOmissions(toolResult)...)
-					default:
-						if knownTurnItemType(item.Type) {
-							omissions = append(omissions, omission("unsupported_event", "events", "A recognized Codex item is not represented by the public event model."))
-						} else {
-							omissions = append(omissions, omission("unknown_format", "events", "A completed Codex item type was not recognized."))
-						}
-					}
-				}
-			}
-		case "response_item":
-			if historyMode != "legacy" {
-				continue
-			}
-			var item struct {
-				Type   string `json:"type"`
-				Name   string `json:"name"`
-				CallID string `json:"call_id"`
-			}
-			if json.Unmarshal(line.Payload, &item) != nil {
-				continue
-			}
-			switch item.Type {
-			case "function_call", "custom_tool_call", "local_shell_call":
-				if item.CallID == "" {
-					omissions = append(omissions, omission("correlation_omitted", "events", "A tool call lacked a correlation identifier."))
-					continue
-				}
-				if _, duplicate := calls[item.CallID]; duplicate {
-					omissions = append(omissions, omission("duplicate_call_id", "events", "A provider tool call identifier was duplicated."))
-					calls[item.CallID] = ""
-					continue
-				}
-				callID := normalizedCallID(threadID, item.CallID)
-				calls[item.CallID] = callID
-				category := "tool"
-				if item.Type == "local_shell_call" || item.Name == "exec_command" || item.Name == "shell" {
-					category = "shell"
-				} else if item.Name == "apply_patch" {
-					category = "file_change"
-				}
-				action := "invoke"
-				if category == "shell" {
-					action = "execute"
-				} else if category == "file_change" {
-					action = "edit"
-				}
-				events = append(events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}})
-			case "function_call_output", "custom_tool_call_output":
-				if normalized, ok := calls[item.CallID]; ok && normalized != "" {
-					omissions = append(omissions, omission("unsupported_tool_result", "events", "A correlated tool result did not expose a safe success value."))
-					delete(calls, item.CallID)
-				} else {
-					omissions = append(omissions, omission("correlation_omitted", "events", "A tool result did not reference an earlier unique call."))
-				}
-			}
-		}
-	}
-	for _, normalized := range calls {
-		if normalized != "" {
-			omissions = append(omissions, omission("correlation_omitted", "events", "A tool call did not have a safely correlated persisted result."))
-		}
-	}
-	if len(events) > maxNormalizedEvents {
-		events = events[:maxNormalizedEvents]
-		omissions = append(omissions, omission("resource_limit", "events", "The normalized event count exceeded the input limit."))
-	}
-	return events, omissions
 }
 
 func codexToolResult(item completedItem, callID string, success bool) contract.ToolResultEvent {
@@ -663,102 +564,6 @@ func codexTextBlocks(raw json.RawMessage, textType string) (string, bool, bool, 
 		texts = append(texts, *block.Text)
 	}
 	return strings.Join(texts, "\n"), len(texts) > 0, omitted, false
-}
-
-func inspectRows(historyMode string, data []byte) ([]rolloutLine, []contract.Omission) {
-	return inspectRowsVersion(historyMode, supportedVersion, data)
-}
-
-func inspectRowsVersion(historyMode, version string, data []byte) ([]rolloutLine, []contract.Omission) {
-	lines := []rolloutLine{}
-	omissions := []contract.Omission{}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 64<<10), maxRowBytes)
-	for scanner.Scan() {
-		var line rolloutLine
-		if err := safeio.DecodeJSON(scanner.Bytes(), contract.MaxJSONDepth, &line); err != nil {
-			omissions = append(omissions, omission("malformed_record", "events", "A Codex JSONL row could not be decoded."))
-			continue
-		}
-		if version == "0.153.0" && line.Type == "token_usage_record" {
-			continue
-		}
-		if !knownTopLevel(line.Type) {
-			omissions = append(omissions, omission("unknown_format", "events", "A Codex JSONL row type was not recognized."))
-			continue
-		}
-		if line.Type == "event_msg" {
-			var payload struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal(line.Payload, &payload) != nil || payload.Type == "" {
-				omissions = append(omissions, omission("malformed_record", "events", "A Codex event row could not be decoded."))
-				continue
-			}
-			if !knownEventType(payload.Type) {
-				omissions = append(omissions, omission("unknown_format", "events", "A Codex event type was not recognized."))
-				continue
-			}
-		}
-		if line.Type == "response_item" {
-			var payload struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal(line.Payload, &payload) != nil || payload.Type == "" {
-				omissions = append(omissions, omission("malformed_record", "events", "A Codex response row could not be decoded."))
-				continue
-			}
-			if !knownResponseType(payload.Type) {
-				omissions = append(omissions, omission("unknown_format", "events", "A Codex response type was not recognized."))
-				continue
-			}
-		}
-		lines = append(lines, line)
-	}
-	if scanner.Err() != nil {
-		omissions = append(omissions, omission("resource_limit", "events", "A Codex JSONL row exceeded the input limit."))
-	}
-	return lines, omissions
-}
-
-func knownResponseType(value string) bool {
-	switch value {
-	case "message", "agent_message", "reasoning", "local_shell_call", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "tool_search_call", "tool_search_output", "web_search_call", "image_generation_call", "configuration_update", "compaction", "compaction_summary", "context_compaction":
-		return true
-	default:
-		return false
-	}
-}
-
-func knownTurnItemType(value string) bool {
-	switch value {
-	case "UserMessage", "HookPrompt", "AgentMessage", "Plan", "Reasoning", "CommandExecution", "DynamicToolCall", "CollabAgentToolCall", "SubAgentActivity", "WebSearch", "ImageView", "Extension", "ImageGeneration", "EnteredReviewMode", "ExitedReviewMode", "FileChange", "McpToolCall", "ContextCompaction":
-		return true
-	default:
-		return false
-	}
-}
-
-func knownTopLevel(value string) bool {
-	switch value {
-	case "session_meta", "response_item", "event_msg", "inter_agent_communication", "inter_agent_communication_metadata", "compacted", "turn_context", "world_state", "security_risk_score":
-		return true
-	default:
-		return false
-	}
-}
-
-func isSupportedVersion(value string) bool {
-	return value == supportedVersion || value == "0.153.0"
-}
-
-func knownEventType(value string) bool {
-	switch value {
-	case "user_message", "agent_message", "error", "item_completed", "task_started", "turn_started", "task_complete", "turn_complete", "turn_aborted", "token_count", "thread_rolled_back", "thread_settings_applied", "context_compacted", "agent_reasoning", "agent_reasoning_raw_content", "mcp_tool_call_end", "web_search_end", "image_generation_end", "entered_review_mode", "exited_review_mode", "sub_agent_activity":
-		return true
-	default:
-		return false
-	}
 }
 
 func messageEvent(role, text string) contract.Event {

@@ -1,60 +1,76 @@
 package codex
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
 	"time"
 
 	"github.com/mtk177a/agent-sessions/internal/contract"
-	"github.com/mtk177a/agent-sessions/internal/safeio"
 )
 
 // readLastInteractionAt uses only recognized conversation rows. An unfamiliar row
 // may contain a later interaction, so it makes the timestamp unavailable.
-func readLastInteractionAt(root string, item artifact) (string, bool) {
-	if item.meta.HistoryBase != nil || item.compressed {
-		return "", false
-	}
-	data, err := safeio.ReadFileWithin(root, item.relative, maxArtifactBytes)
+func readLastInteractionAt(root string, item artifact, byRollout map[string][]artifact) (string, *contract.VersionHint, bool) {
+	spans, err := resolveHistory(item, byRollout)
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 64<<10), maxRowBytes)
 	var latest time.Time
-	for scanner.Scan() {
-		var line rolloutLine
-		if safeio.DecodeJSON(scanner.Bytes(), contract.MaxJSONDepth, &line) != nil {
-			return "", false
+	safeTime := true
+	requireOrdinals := false
+	for _, span := range spans {
+		requireOrdinals = requireOrdinals || interactionTimeCompatibility(span.item.meta.CLIVersion, span.item.meta.HistoryMode).requireOrdinals
+	}
+	plan, err := walkHistory(root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, requireOrdinals, func(origin artifact, line rolloutLine) {
+		if !supportsInteractionTime(origin.meta.CLIVersion, origin.meta.HistoryMode) {
+			safeTime = false
+			return
 		}
-		activity, safe := codexInteractionRow(item.meta.HistoryMode, item.meta.CLIVersion, line)
+		activity, safe := codexInteractionRow(origin.meta.HistoryMode, origin.meta.CLIVersion, line)
 		if !safe {
-			return "", false
+			safeTime = false
+			return
 		}
 		if !activity {
-			continue
+			return
 		}
 		at, err := time.Parse(time.RFC3339Nano, line.Timestamp)
 		if err != nil {
-			return "", false
+			safeTime = false
+			return
 		}
 		if latest.IsZero() || at.After(latest) {
 			latest = at
 		}
+	})
+	if err != nil {
+		return "", nil, false
 	}
-	if scanner.Err() != nil || latest.IsZero() {
-		return "", false
+	var hint *contract.VersionHint
+	if plan.logical {
+		hint = &contract.VersionHint{Kind: "content_hash", Value: plan.hint}
 	}
-	return latest.UTC().Format(time.RFC3339Nano), true
+	if plan.malformedRows > 0 || plan.oversizedRows > 0 {
+		safeTime = false
+	}
+	if !safeTime || latest.IsZero() {
+		return "", hint, false
+	}
+	return latest.UTC().Format(time.RFC3339Nano), hint, true
 }
 
 func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, bool) {
+	compatibility := interactionTimeCompatibility(version, historyMode)
+	profile := compatibility.profile
+	if !validRowForProfile(profile, version, line, compatibility.forward) {
+		return false, false
+	}
 	switch line.Type {
-	case "session_meta", "inter_agent_communication_metadata", "compacted", "turn_context", "world_state", "security_risk_score":
+	case "session_meta", "inter_agent_communication_metadata", "compacted", "turn_context", "world_state":
+		return false, true
+	case "security_risk_score":
 		return false, true
 	case "token_usage_record":
-		return false, version == "0.153.0"
+		return false, true
 	case "inter_agent_communication", "realtime_item":
 		return false, false
 	case "event_msg":
@@ -62,7 +78,7 @@ func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, b
 			Type string          `json:"type"`
 			Item json.RawMessage `json:"item"`
 		}
-		if json.Unmarshal(line.Payload, &event) != nil || !knownEventType(event.Type) {
+		if json.Unmarshal(line.Payload, &event) != nil {
 			return false, false
 		}
 		if historyMode == "legacy" && (event.Type == "user_message" || event.Type == "agent_message") {
@@ -71,14 +87,22 @@ func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, b
 		if historyMode == "paginated" && event.Type == "item_completed" {
 			var completed struct {
 				Type string `json:"type"`
+				Kind string `json:"kind"`
+				ID   string `json:"id"`
 			}
-			if json.Unmarshal(event.Item, &completed) != nil || !knownTurnItemType(completed.Type) {
+			if json.Unmarshal(event.Item, &completed) != nil {
 				return false, false
 			}
-			switch completed.Type {
-			case "UserMessage", "AgentMessage", "CommandExecution", "McpToolCall", "DynamicToolCall":
+			if completed.Type == "Sleep" && version == "0.144.2" {
 				return true, true
-			case "Reasoning", "Plan", "ContextCompaction", "HookPrompt", "EnteredReviewMode", "ExitedReviewMode":
+			}
+			switch completed.Type {
+			case "UserMessage", "AgentMessage", "CommandExecution", "McpToolCall", "DynamicToolCall", "CollabAgentToolCall", "FileChange", "FunctionCallOutput", "WebSearch":
+				return true, true
+			case "Extension":
+				known := completed.Kind == "web.search" || (completed.Kind == "clock.sleep" && version != "0.144.2")
+				return known && completed.ID != "", known && completed.ID != ""
+			case "Reasoning", "Plan", "ContextCompaction", "HookPrompt", "EnteredReviewMode", "ExitedReviewMode", "SubAgentActivity":
 				return false, true
 			default:
 				return false, false
@@ -93,11 +117,11 @@ func codexInteractionRow(historyMode, version string, line rolloutLine) (bool, b
 			Type string `json:"type"`
 			Role string `json:"role"`
 		}
-		if json.Unmarshal(line.Payload, &response) != nil || !knownResponseType(response.Type) {
+		if json.Unmarshal(line.Payload, &response) != nil {
 			return false, false
 		}
 		switch response.Type {
-		case "function_call", "custom_tool_call", "local_shell_call", "function_call_output", "custom_tool_call_output":
+		case "function_call", "custom_tool_call", "local_shell_call", "function_call_output", "custom_tool_call_output", "web_search_call", "tool_search_call", "tool_search_output":
 			return true, true
 		case "message":
 			switch response.Role {

@@ -109,12 +109,13 @@ Source `kind` is an extensible token; the currently emitted values are `session`
 Consumers must not reject an otherwise valid `v1` response solely because a source uses an unrecognized `kind` token.
 
 When present, `version_hint` requires `kind` and `value`, and its `kind` is also extensible.\
-Codex and Claude Code emit `stat_hash` for inexpensive change detection, while ChatGPT Data Export emits `snapshot_hash` for the SHA-256 identity of the complete export ZIP.\
+Codex sources without inherited history and Claude Code emit `stat_hash` for inexpensive change detection; Codex sources with safely resolved inherited history emit `content_hash` for the included rollout ranges.\
+ChatGPT Data Export emits `snapshot_hash` for the SHA-256 identity of the complete export ZIP.\
 Consumers may use a recognized hint for change detection and must ignore an unrecognized hint kind.
 
 `last_interaction_at`, when present, is a canonical UTC RFC 3339 timestamp ending in `Z`.\
 It is the latest recorded user or assistant message, tool call, or tool result time in the logical source; management rows, system notifications, and file modification times are excluded.\
-It is absent if no interaction exists or the maximum cannot be established safely, including missing or malformed activity timestamps, unknown potentially interactive rows, unverified versions, ambiguous artifacts, and omitted inherited history.\
+It is absent if no interaction exists or the maximum cannot be established safely, including missing or malformed activity timestamps, unknown potentially interactive rows, versions outside the provider's interaction-time compatibility boundary, ambiguous artifacts, and unresolved inherited history.\
 Such absence adds `source_time_unavailable` with `scope: source` and makes `list` or `show` partial; `count` may aggregate affected sources.\
 For ChatGPT Data Export, the selected active branch defines the interactions considered; other branches do not advance this field.
 

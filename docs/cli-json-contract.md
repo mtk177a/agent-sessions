@@ -152,10 +152,17 @@ They do not change merely because the public response schema has reached `v1`.
 
 Each event requires `index`, `kind`, exactly one typed event payload, and bounded `metadata`.
 
+New responses also report optional `time_state` and, when available, `recorded_at` for each emitted event.\
+`recorded_at` is the provider record's timestamp normalized to canonical UTC RFC3339, not an inferred operation start or end time.\
+`time_state` is `available` when `recorded_at` is present, `absent` when the record has no timestamp, `unavailable` when its value cannot be used safely, or `unsupported` when its time semantics are not supported.\
+The latter three states omit `recorded_at` and add an aggregated `event_time_omitted` omission with `scope: events`, making `events` partial.\
+An event response that was previously `complete` can therefore become `partial` when its source record lacks a usable time.\
+An omitted `time_state` in an older `v1` response does not mean `absent`.
+
 Supported kinds are:
 
 - `message`, with `role` and redacted `text`;
-- `tool_call`, with a normalized `call_id`, safe operation `category`, and optional `action` and `evidence_state`;
+- `tool_call`, with a normalized `call_id`, safe operation `category`, and optional `action`, `evidence_state`, and `input_state`;
 - `tool_result`, with the related `call_id`, `success`, and optional `exit_code`, `excerpt`, `evidence_state`, `redacted`, and `truncated` fields;
 - `error`, with a safe `category` and redacted `message`.
 
@@ -163,6 +170,12 @@ A tool result must reference one earlier unique tool call, and at most one norma
 Provider adapters report duplicate, missing, or unmatched correlation as an omission instead of emitting an ambiguous event sequence.
 
 Raw commands and raw tool arguments are not part of the public event model.
+
+`input_state` describes only whether a verified provider input field exists, not whether it contains a meaningful request.\
+It is `withheld` when the field exists (including an empty object or array), `absent` when a verified format confirms it is missing, `unavailable` when presence cannot be determined safely, or `unsupported` when its shape cannot be interpreted safely.\
+Raw input is never included; `withheld` alone does not reduce completeness.\
+`unavailable` and `unsupported` add an aggregated `tool_input_unavailable` omission with `scope: tool_call`.\
+An omitted `input_state` in an older `v1` response does not mean `absent`.
 
 `evidence_state` is optional for compatibility with earlier `v1` responses.\
 When it is omitted, the evidence state was not reported; consumers must not interpret its omission as `absent`.\

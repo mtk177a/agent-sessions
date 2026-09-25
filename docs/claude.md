@@ -62,6 +62,10 @@ Known tool names map to `execute`, `read`, `search`, `write`, or `edit`; other c
 String and text-block tool results use the common safe excerpt policy; non-text blocks and unsafe lines are excluded and reduce completeness.\
 Raw commands, tool input, unrestricted tool output, arbitrary provider tool names, provider correlation identifiers, and absolute paths are not exposed as public structural values.
 
+Each emitted event uses its transcript row's timestamp; multiple events from one row therefore share `recorded_at`.\
+A `tool_use` block with an object-valued `input` field reports `input_state: withheld`, including an empty object.\
+A missing field reports `absent`, while an unsupported value reports `unsupported`.
+
 ## Subagents and sidecars
 
 Claude Code documents subagent transcripts at `projects/<project>/<session-id>/subagents/agent-<agent-id>.jsonl`.\

@@ -136,6 +136,23 @@ func TestEventsFollowActiveBranchAndDescribeOmissions(t *testing.T) {
 	}
 }
 
+func TestEventRecordedTimeStates(t *testing.T) {
+	body := `[{"id":"conversation-a","current_node":"third","mapping":{
+		"first":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["one"]},"create_time":1780000000.5}},
+		"second":{"parent":"first","message":{"author":{"role":"assistant"},"content":{"content_type":"text","parts":["two"]}}},
+		"third":{"parent":"second","message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["three"]},"create_time":"invalid"}}
+	}}]`
+	path := writeZIP(t, []zipMember{{"conversations.json", body}})
+	result := New().Events(t.Context(), config.Source{ID: "export", Provider: providerName, Root: path}, contract.SourceFingerprint("conversation-a"))
+	if result.Status != contract.StatusPartial || len(result.Events) != 3 || result.Events[0].RecordedAt != "2026-05-28T20:26:40.5Z" || result.Events[0].TimeState != contract.TimeAvailable || result.Events[1].TimeState != contract.TimeAbsent || result.Events[2].TimeState != contract.TimeUnavailable || !hasOmission(result.Omissions, "event_time_omitted") {
+		t.Fatalf("Events() = %#v", result)
+	}
+	verified := New().Evidence(t.Context(), config.Source{ID: "export", Provider: providerName, Root: path}, contract.SourceFingerprint("conversation-a"))
+	if verified.Status != contract.StatusComplete || hasOmission(verified.Omissions, "event_time_omitted") {
+		t.Fatalf("Evidence() = %#v", verified)
+	}
+}
+
 func TestMissingNodeAndCycleAreUnsupported(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -60,6 +60,11 @@ For canonicalized legacy paginated history, completed message items are canonica
 Tool call identifiers are deterministic adapter-owned hashes of the thread identity and provider correlation identifier.\
 Public categories are limited to `shell`, `file_change`, `mcp`, and `tool`; raw commands, arguments, tool payloads, and arbitrary provider tool names are not normalized into public structural fields.
 
+Emitted events use the timestamp of their canonical rollout row.\
+A completed tool item gives its call and result the same `recorded_at`; it does not establish separate call and result times.\
+Input presence comes from the item-specific `command`, `arguments`, or `input` field (or the legacy local shell action's `command` field).\
+Older accepted rows missing an expected input field report `input_state: unavailable` rather than claiming the input was absent.
+
 Completed command items emit `execute`; completed MCP and dynamic tool items emit `invoke`.\
 Known legacy shell and patch calls emit `execute` and `edit`, while other correlated calls emit `invoke`.\
 For completed command items, the excerpt reader prefers non-empty `aggregated_output`, then `stdout` and `stderr`, then `formatted_output`.\

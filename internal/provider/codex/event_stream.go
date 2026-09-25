@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/mtk177a/agent-sessions/internal/contract"
@@ -28,6 +29,7 @@ func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
 		n.omissions = append(n.omissions, omission("unknown_format", "events", "A Codex JSONL row or payload type was not recognized for its stored format."))
 		return
 	}
+	before := len(n.events)
 	switch line.Type {
 	case "event_msg":
 		var event struct {
@@ -59,7 +61,7 @@ func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
 				n.omissions = append(n.omissions, omission("malformed_record", "events", "A completed Codex item could not be decoded."))
 				return
 			}
-			n.completed(profile, item)
+			n.completed(profile, item, event.Item)
 		}
 	case "response_item":
 		if profile == profileNativePaginated {
@@ -67,9 +69,12 @@ func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
 		}
 		n.legacyResponse(line.Payload)
 	}
+	for i := before; i < len(n.events); i++ {
+		contract.SetEventTime(&n.events[i], line.Timestamp)
+	}
 }
 
-func (n *eventNormalizer) completed(profile storageProfile, item completedItem) {
+func (n *eventNormalizer) completed(profile storageProfile, item completedItem, raw json.RawMessage) {
 	switch item.Type {
 	case "UserMessage":
 		text, hasText, contentOmission := normalizeUserContent(item.Content)
@@ -110,7 +115,7 @@ func (n *eventNormalizer) completed(profile storageProfile, item completedItem) 
 			action = "execute"
 		}
 		callID := normalizedCallID(n.threadID, item.ID)
-		n.events = append(n.events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}})
+		n.events = append(n.events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable, InputState: completedInputState(item.Type, raw)}, Metadata: []contract.Metadata{}})
 		result := codexToolResult(item, callID, item.Status == "completed" || item.ExitCode != nil && *item.ExitCode == 0)
 		n.events = append(n.events, contract.Event{Kind: contract.EventToolResult, ToolResult: &result, Metadata: []contract.Metadata{}})
 		n.omissions = append(n.omissions, contract.ToolResultOmissions(result)...)
@@ -152,7 +157,7 @@ func (n *eventNormalizer) legacyResponse(raw json.RawMessage) {
 		} else if item.Name == "apply_patch" {
 			category, action = "file_change", "edit"
 		}
-		n.events = append(n.events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}})
+		n.events = append(n.events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable, InputState: legacyInputState(item.Type, raw)}, Metadata: []contract.Metadata{}})
 	case "function_call_output", "custom_tool_call_output":
 		if normalized, ok := n.calls[item.CallID]; ok && normalized != "" {
 			n.omissions = append(n.omissions, omission("unsupported_tool_result", "events", "A correlated tool result did not expose a safe success value."))
@@ -173,5 +178,51 @@ func (n *eventNormalizer) finish() ([]contract.Event, []contract.Omission) {
 		n.events = n.events[:maxNormalizedEvents]
 		n.omissions = append(n.omissions, omission("resource_limit", "events", "The normalized event count exceeded the input limit."))
 	}
+	n.omissions = append(n.omissions, contract.EventTimeOmissions(n.events)...)
+	n.omissions = append(n.omissions, contract.ToolInputOmissions(n.events)...)
 	return n.events, n.omissions
+}
+
+func completedInputState(itemType string, raw json.RawMessage) contract.InputState {
+	field := "arguments"
+	if itemType == "CommandExecution" {
+		field = "command"
+	}
+	return inputFieldState(raw, field)
+}
+
+func legacyInputState(itemType string, raw json.RawMessage) contract.InputState {
+	switch itemType {
+	case "function_call":
+		return inputFieldState(raw, "arguments")
+	case "custom_tool_call":
+		return inputFieldState(raw, "input")
+	case "local_shell_call":
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil {
+			return contract.InputUnsupported
+		}
+		if len(fields["action"]) == 0 {
+			return contract.InputUnavailable
+		}
+		return inputFieldState(fields["action"], "command")
+	default:
+		return contract.InputUnavailable
+	}
+}
+
+func inputFieldState(raw json.RawMessage, field string) contract.InputState {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return contract.InputUnsupported
+	}
+	value, exists := fields[field]
+	if !exists {
+		return contract.InputUnavailable
+	}
+	value = bytes.TrimSpace(value)
+	if len(value) == 0 || value[0] != '{' && value[0] != '[' && value[0] != '"' {
+		return contract.InputUnsupported
+	}
+	return contract.InputWithheld
 }

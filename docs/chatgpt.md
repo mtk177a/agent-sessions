@@ -3,7 +3,9 @@
 The `chatgpt` provider adapter reads a user-requested ChatGPT Data Export ZIP and maps conversations into the provider-neutral stable `v1` CLI contract.
 
 `list` and `show` expose `last_interaction_at` when the selected conversation branch establishes the latest interaction time.\
-If they cannot establish it, they omit the field and return `partial` with `source_time_unavailable`; `events` and `verify` retain their existing completeness rules.
+If they cannot establish it, they omit the field and return `partial` with `source_time_unavailable`.\
+Emitted message events separately report their own `create_time` as `recorded_at`; missing or invalid values make `events` partial with `event_time_omitted`.\
+`verify` retains its existing completeness rules.
 
 OpenAI documents how users request a Data Export and that the downloaded ZIP contains chat history.\
 OpenAI does not document the archive's conversation JSON graph as a stable API, so every internal member name and field used for normalization remains an adapter-owned compatibility boundary.

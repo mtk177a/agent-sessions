@@ -212,6 +212,9 @@ func (r Runner) runEvents(ctx context.Context, args []string, output io.Writer) 
 	if err := validateToolEvidenceOmissions(result.Events, result.Omissions); err != nil {
 		return r.writeError(output, "events", ExitFailure, "invalid_provider_result", "provider", "The provider returned inconsistent tool evidence.")
 	}
+	if err := validateEventStateOmissions(result.Events, result.Omissions); err != nil {
+		return r.writeError(output, "events", ExitFailure, "invalid_provider_result", "provider", "The provider returned inconsistent event state.")
+	}
 	events, next, pageOmission, err := paginateEvents(result.Events, offset, *limit)
 	if err != nil {
 		return r.writeError(output, "events", ExitUsage, "invalid_cursor", "usage", "The page cursor is outside the available result.")
@@ -565,13 +568,21 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 		if payloads != 1 {
 			return errors.New("event must contain one typed payload")
 		}
+		if event.TimeState != "" && !contract.ValidTimeState(event.TimeState) || (event.TimeState == contract.TimeAvailable) != (event.RecordedAt != "") {
+			return errors.New("invalid event time state")
+		}
+		if event.RecordedAt != "" {
+			if err := contract.ValidateInteractionTime(event.RecordedAt); err != nil {
+				return err
+			}
+		}
 		switch event.Kind {
 		case contract.EventMessage:
 			if event.Message == nil || event.Message.Role != "user" && event.Message.Role != "assistant" {
 				return errors.New("invalid message event")
 			}
 		case contract.EventToolCall:
-			if event.ToolCall == nil || !contract.ValidIdentifier(event.ToolCall.CallID) || !contract.ValidToken(event.ToolCall.Category) || event.ToolCall.EvidenceState != "" && !contract.ValidEvidenceState(event.ToolCall.EvidenceState) || (event.ToolCall.EvidenceState == contract.EvidenceAvailable) != (event.ToolCall.Action != "") || event.ToolCall.Action != "" && !contract.ValidToolAction(event.ToolCall.Action) {
+			if event.ToolCall == nil || !contract.ValidIdentifier(event.ToolCall.CallID) || !contract.ValidToken(event.ToolCall.Category) || event.ToolCall.EvidenceState != "" && !contract.ValidEvidenceState(event.ToolCall.EvidenceState) || event.ToolCall.InputState != "" && !contract.ValidInputState(event.ToolCall.InputState) || (event.ToolCall.EvidenceState == contract.EvidenceAvailable) != (event.ToolCall.Action != "") || event.ToolCall.Action != "" && !contract.ValidToolAction(event.ToolCall.Action) {
 				return errors.New("invalid tool call event")
 			}
 			if _, exists := calls[event.ToolCall.CallID]; exists {
@@ -600,6 +611,22 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 			if !contract.ValidToken(metadata.Name) {
 				return errors.New("invalid event metadata name")
 			}
+		}
+	}
+	return nil
+}
+
+func validateEventStateOmissions(events []contract.Event, omissions []contract.Omission) error {
+	for _, required := range append(contract.EventTimeOmissions(events), contract.ToolInputOmissions(events)...) {
+		found := false
+		for _, actual := range omissions {
+			if actual.Code == required.Code && actual.Scope == required.Scope && actual.Count == required.Count {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return errors.New("event state lacks a matching omission")
 		}
 	}
 	return nil

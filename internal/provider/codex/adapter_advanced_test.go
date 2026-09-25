@@ -27,9 +27,9 @@ func TestPaginatedHistoryUsesCompletedItemsAsCanonicalRows(t *testing.T) {
 		header(testThreadID, "0.149.1", "paginated", ""),
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"duplicate"}]}}`,
 		`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"secret\"}","call_id":"raw-call"}}`,
-		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"canonical user"}]}}}`,
-		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"agent-1","content":[{"type":"Text","text":"canonical assistant"}]}}}`,
-		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"must not escape"}}}`,
+		`{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"canonical user"}]}}}`,
+		`{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"agent-1","content":[{"type":"Text","text":"canonical assistant"}]}}}`,
+		`{"timestamp":"2026-09-03T10:00:02Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"must not escape"}}}`,
 	})
 	result := eventsForOnlySource(t, home)
 	if result.Status != contract.StatusComplete || len(result.Events) != 4 {
@@ -39,7 +39,7 @@ func TestPaginatedHistoryUsesCompletedItemsAsCanonicalRows(t *testing.T) {
 		t.Fatalf("canonical messages = %#v", result.Events[:2])
 	}
 	call, toolResult := result.Events[2].ToolCall, result.Events[3].ToolResult
-	if call == nil || toolResult == nil || call.CallID != toolResult.CallID || call.CallID == "command-1" || !contract.ValidIdentifier(call.CallID) || call.Action != "execute" || call.EvidenceState != contract.EvidenceAvailable || toolResult.EvidenceState != contract.EvidenceAbsent {
+	if call == nil || toolResult == nil || call.CallID != toolResult.CallID || call.CallID == "command-1" || !contract.ValidIdentifier(call.CallID) || call.Action != "execute" || call.EvidenceState != contract.EvidenceAvailable || call.InputState != contract.InputWithheld || toolResult.EvidenceState != contract.EvidenceAbsent || result.Events[2].RecordedAt != "2026-09-03T10:00:02Z" || result.Events[3].RecordedAt != result.Events[2].RecordedAt {
 		t.Fatalf("normalized tool pair = %#v", result.Events[2:])
 	}
 	encoded, err := json.Marshal(result.Events)
@@ -66,6 +66,30 @@ func TestPaginatedToolEvidenceUsesSafeResultLines(t *testing.T) {
 	call, outcome := result.Events[0].ToolCall, result.Events[1].ToolResult
 	if call == nil || call.Action != "execute" || call.EvidenceState != contract.EvidenceAvailable || outcome == nil || outcome.Excerpt != "PASS\n3 tests passed" || outcome.EvidenceState != contract.EvidenceAvailable || !outcome.Redacted {
 		t.Fatalf("tool evidence = %#v", result.Events)
+	}
+}
+
+func TestCompletedToolInputPresenceAndInvalidTime(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.153.0", "paginated", ""),
+		`{"timestamp":"invalid","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp-1","status":"completed","arguments":{},"result":{"content":[]}}}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || result.Events[0].ToolCall.InputState != contract.InputWithheld || result.Events[0].TimeState != contract.TimeUnavailable || result.Events[1].TimeState != contract.TimeUnavailable || !hasOmission(result.Omissions, "event_time_omitted") || hasOmission(result.Omissions, "tool_input_unavailable") {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
+func TestMissingEventTimestampMakesEventsPartial(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.149.1", "paginated", ""),
+		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"hello"}]}}}`,
+	})
+	result := eventsForOnlySource(t, home)
+	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].TimeState != contract.TimeAbsent || result.Events[0].RecordedAt != "" || !hasOmission(result.Omissions, "event_time_omitted") {
+		t.Fatalf("Events() = %#v", result)
 	}
 }
 
@@ -216,7 +240,7 @@ func TestCorrelationFailuresArePartialAndNotGuessed(t *testing.T) {
 		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"orphan","output":"fictional output"}}`,
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].ToolCall == nil || len(result.Omissions) != 3 {
+	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].ToolCall == nil || result.Events[0].ToolCall.InputState != contract.InputUnavailable || !hasOmission(result.Omissions, "tool_input_unavailable") || !hasOmission(result.Omissions, "event_time_omitted") {
 		t.Fatalf("Events() = %#v", result)
 	}
 }

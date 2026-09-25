@@ -84,6 +84,7 @@ type sidecarMeta struct {
 
 type contentBlock struct {
 	Type       string          `json:"type"`
+	Input      json.RawMessage `json:"input"`
 	Text       string          `json:"text"`
 	ID         string          `json:"id"`
 	Name       string          `json:"name"`
@@ -196,6 +197,8 @@ func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint st
 	}
 	events, rowOmissions := normalizeRows(item.sessionID, data)
 	omissions = append(omissions, rowOmissions...)
+	omissions = append(omissions, contract.EventTimeOmissions(events)...)
+	omissions = append(omissions, contract.ToolInputOmissions(events)...)
 	if len(events) == 0 && len(omissions) > 0 {
 		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: omissions}
 	}
@@ -464,7 +467,9 @@ func normalizeRows(sessionID string, data []byte) ([]contract.Event, []contract.
 	calls := map[string]string{}
 	results := map[string]struct{}{}
 	invalidCalls := map[string]struct{}{}
+	currentTimestamp := ""
 	appendEvent := func(event contract.Event) {
+		contract.SetEventTime(&event, currentTimestamp)
 		if len(events) < maxNormalizedEvents {
 			events = append(events, event)
 		} else if !hasOmissionCode(omissions, "resource_limit") {
@@ -505,6 +510,7 @@ func normalizeRows(sessionID string, data []byte) ([]contract.Event, []contract.
 			omissions = append(omissions, omission("unsupported_format", "events", "A Claude row version has not been verified for this adapter."))
 			continue
 		}
+		currentTimestamp = row.Timestamp
 
 		switch row.Type {
 		case "user":
@@ -677,7 +683,7 @@ func normalizeAssistantPayload(payload messagePayload, apiError bool, sessionID 
 			}
 			callID := normalizedCallID(sessionID, block.ID)
 			calls[block.ID] = callID
-			appendEvent(contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: toolCategory(block.Name), Action: toolAction(block.Name), EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}})
+			appendEvent(contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: toolCategory(block.Name), Action: toolAction(block.Name), EvidenceState: contract.EvidenceAvailable, InputState: claudeInputState(block.Input)}, Metadata: []contract.Metadata{}})
 			emittedTool = true
 		case "thinking", "redacted_thinking":
 			flushText()
@@ -691,6 +697,17 @@ func normalizeAssistantPayload(payload messagePayload, apiError bool, sessionID 
 	if !emittedText && !emittedTool {
 		*omissions = append(*omissions, omission("unsupported_event", "events", "A Claude assistant message had no public text or tool call."))
 	}
+}
+
+func claudeInputState(raw json.RawMessage) contract.InputState {
+	if len(raw) == 0 {
+		return contract.InputAbsent
+	}
+	raw = bytes.TrimSpace(raw)
+	if raw[0] != '{' {
+		return contract.InputUnsupported
+	}
+	return contract.InputWithheld
 }
 
 func decodeMessage(raw json.RawMessage, role string) (messagePayload, bool) {

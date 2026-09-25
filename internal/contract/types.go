@@ -90,6 +90,8 @@ const (
 type Event struct {
 	Index      uint64           `json:"index"`
 	Kind       EventKind        `json:"kind"`
+	RecordedAt string           `json:"recorded_at,omitempty"`
+	TimeState  TimeState        `json:"time_state,omitempty"`
 	Message    *MessageEvent    `json:"message,omitempty"`
 	ToolCall   *ToolCallEvent   `json:"tool_call,omitempty"`
 	ToolResult *ToolResultEvent `json:"tool_result,omitempty"`
@@ -107,7 +109,26 @@ type ToolCallEvent struct {
 	Category      string        `json:"category"`
 	Action        string        `json:"action,omitempty"`
 	EvidenceState EvidenceState `json:"evidence_state,omitempty"`
+	InputState    InputState    `json:"input_state,omitempty"`
 }
+
+type TimeState string
+
+const (
+	TimeAvailable   TimeState = "available"
+	TimeAbsent      TimeState = "absent"
+	TimeUnavailable TimeState = "unavailable"
+	TimeUnsupported TimeState = "unsupported"
+)
+
+type InputState string
+
+const (
+	InputAbsent      InputState = "absent"
+	InputWithheld    InputState = "withheld"
+	InputUnavailable InputState = "unavailable"
+	InputUnsupported InputState = "unsupported"
+)
 
 type ToolResultEvent struct {
 	CallID        string        `json:"call_id"`

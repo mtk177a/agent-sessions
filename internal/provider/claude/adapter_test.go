@@ -84,6 +84,39 @@ func TestClaudeToolEvidenceUsesSafeResultLines(t *testing.T) {
 	}
 }
 
+func TestClaudeToolInputPresenceAndEventTime(t *testing.T) {
+	rows := []string{
+		row("assistant", `{"role":"assistant","content":[{"type":"tool_use","id":"empty","name":"Read","input":{}},{"type":"tool_use","id":"missing","name":"Read"},{"type":"tool_use","id":"invalid","name":"Read","input":null}]}`, ""),
+	}
+	events, omissions := normalizeRows(testSessionID, []byte(strings.Join(rows, "\n")))
+	if len(events) != 3 || events[0].ToolCall.InputState != contract.InputWithheld || events[1].ToolCall.InputState != contract.InputAbsent || events[2].ToolCall.InputState != contract.InputUnsupported || events[0].RecordedAt != "2026-09-03T10:00:00Z" || events[2].TimeState != contract.TimeAvailable || len(contract.ToolInputOmissions(events)) != 1 || len(omissions) != 3 {
+		t.Fatalf("events = %#v, omissions = %#v", events, omissions)
+	}
+	home := t.TempDir()
+	writeTranscript(t, home, "fictional-project", testSessionID, rows)
+	result := New().Events(t.Context(), testSource(home), contract.SourceFingerprint(testSessionID))
+	if result.Status != contract.StatusPartial || !hasOmission(result.Omissions, "tool_input_unavailable") {
+		t.Fatalf("Events() = %#v", result)
+	}
+}
+
+func TestClaudeEventTimeOmissions(t *testing.T) {
+	missing := strings.Replace(row("user", `{"role":"user","content":"one"}`, ""), `"timestamp":"2026-09-03T10:00:00Z",`, "", 1)
+	invalid := strings.Replace(row("user", `{"role":"user","content":"two"}`, ""), "2026-09-03T10:00:00Z", "invalid", 1)
+	events, omissions := normalizeRows(testSessionID, []byte(missing+"\n"+invalid+"\n"))
+	if len(events) != 2 || events[0].TimeState != contract.TimeAbsent || events[1].TimeState != contract.TimeUnavailable || len(contract.EventTimeOmissions(events)) != 1 || len(omissions) != 0 {
+		t.Fatalf("events = %#v, omissions = %#v", events, omissions)
+	}
+	home := t.TempDir()
+	writeTranscript(t, home, "fictional-project", testSessionID, []string{missing, invalid})
+	fingerprint := contract.SourceFingerprint(testSessionID)
+	result := New().Events(t.Context(), testSource(home), fingerprint)
+	verified := New().Evidence(t.Context(), testSource(home), fingerprint)
+	if result.Status != contract.StatusPartial || !hasOmission(result.Omissions, "event_time_omitted") || verified.Status != contract.StatusComplete {
+		t.Fatalf("Events() = %#v, Evidence() = %#v", result, verified)
+	}
+}
+
 func TestClaudeStructuredToolResultOmitsNonText(t *testing.T) {
 	home := t.TempDir()
 	writeTranscript(t, home, "fictional-project", testSessionID, []string{

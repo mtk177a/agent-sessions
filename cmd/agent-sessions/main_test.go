@@ -308,7 +308,7 @@ func writeCodexTranscript(t *testing.T, root string) {
 		`{"timestamp":"2026-09-04T10:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"user-1","content":[{"type":"text","text":"hello"}]}}}` + "\n" +
 		`{"timestamp":"2026-09-04T10:00:01Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"agent-1","content":[{"type":"Text","text":"hi"}]}}}` + "\n" +
 		`{"timestamp":"2026-09-04T10:00:02Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"must not escape"}}}` + "\n" +
-		`{"type":"event_msg","payload":{"type":"error","message":"fictional provider failure"}}` + "\n"
+		`{"timestamp":"2026-09-04T10:00:03Z","type":"event_msg","payload":{"type":"error","message":"fictional provider failure"}}` + "\n"
 	writeFixture(t, path, content)
 }
 

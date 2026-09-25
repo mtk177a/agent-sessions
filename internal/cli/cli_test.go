@@ -623,6 +623,32 @@ func TestNormalizeAndValidateEventsRejectsDuplicateToolResults(t *testing.T) {
 	}
 }
 
+func TestEventTimeAndToolInputRequireConsistentStateAndOmissions(t *testing.T) {
+	events := []contract.Event{{Kind: contract.EventToolCall, TimeState: contract.TimeAbsent, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool", Action: "invoke", EvidenceState: contract.EvidenceAvailable, InputState: contract.InputUnavailable}, Metadata: []contract.Metadata{}}}
+	if err := normalizeAndValidateEvents(events); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateEventStateOmissions(events, nil); err == nil {
+		t.Fatal("missing event state omissions accepted")
+	}
+	omissions := append(contract.EventTimeOmissions(events), contract.ToolInputOmissions(events)...)
+	if err := validateEventStateOmissions(events, omissions); err != nil {
+		t.Fatalf("matching omissions rejected: %v", err)
+	}
+	events[0].TimeState = contract.TimeAvailable
+	if err := normalizeAndValidateEvents(events); err == nil {
+		t.Fatal("available time without recorded_at accepted")
+	}
+	events[0].RecordedAt = "2026-09-03T10:00:00Z"
+	if err := normalizeAndValidateEvents(events); err != nil {
+		t.Fatalf("available time rejected: %v", err)
+	}
+	events[0].ToolCall.InputState = "invalid"
+	if err := normalizeAndValidateEvents(events); err == nil {
+		t.Fatal("invalid input state accepted")
+	}
+}
+
 func TestNormalizeAndValidateEventsRejectsUnsafeExcerpt(t *testing.T) {
 	events := []contract.Event{
 		{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "shell", Action: "execute", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},

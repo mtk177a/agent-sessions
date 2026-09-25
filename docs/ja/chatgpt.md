@@ -8,7 +8,9 @@
 
 `list` と `show` は、選択中の会話経路から最後のやり取りの時刻を確定できる場合、`last_interaction_at` を公開する。\
 確定できない場合はフィールドを省略し、`source_time_unavailable` を付けて `partial` を返す。\
-`events` と `verify` の完全性の規則は変わらない。
+出力するメッセージイベントは、それぞれの `create_time` を `recorded_at` として報告する。\
+値が欠落または不正な場合は、`event_time_omitted` を付けて `events` を `partial` にする。\
+`verify` の完全性の規則は変わらない。
 
 OpenAI は、Data Export の請求方法と、ダウンロードした ZIP にチャット履歴が含まれることを文書化している。\
 OpenAI はアーカイブ内の会話 JSON グラフを安定した API として文書化していないため、正規化に使用する内部メンバー名とフィールドはすべてアダプターが所有する互換性境界に残す。

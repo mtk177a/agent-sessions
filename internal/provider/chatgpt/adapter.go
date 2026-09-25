@@ -13,6 +13,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/mtk177a/agent-sessions/internal/config"
@@ -188,6 +189,7 @@ func (a *Adapter) Events(ctx context.Context, source config.Source, fingerprint 
 	if !supported {
 		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: omissions}
 	}
+	omissions = append(omissions, contract.EventTimeOmissions(events)...)
 	if err := scanned.view.ensureUnchanged(source.Root); err != nil {
 		return provider.EventResult{Err: err}
 	}
@@ -404,7 +406,16 @@ func (a *Adapter) normalize(conversation rawConversation) ([]contract.Event, []c
 				continue
 			}
 		}
-		events = append(events, contract.Event{Kind: contract.EventMessage, Message: &contract.MessageEvent{Role: message.Author.Role, Text: text}, Metadata: []contract.Metadata{}})
+		event := contract.Event{Kind: contract.EventMessage, Message: &contract.MessageEvent{Role: message.Author.Role, Text: text}, Metadata: []contract.Metadata{}}
+		if len(message.CreateTime) == 0 {
+			event.TimeState = contract.TimeAbsent
+		} else if at, ok := parseUnixSeconds(message.CreateTime); ok {
+			event.RecordedAt = at.UTC().Format(time.RFC3339Nano)
+			event.TimeState = contract.TimeAvailable
+		} else {
+			event.TimeState = contract.TimeUnavailable
+		}
+		events = append(events, event)
 	}
 	if len(events) == 0 && len(omissions) > 0 {
 		return nil, omissions, false, nil

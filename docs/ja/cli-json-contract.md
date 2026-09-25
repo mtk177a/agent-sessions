@@ -161,12 +161,19 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 
 各イベントには `index`、`kind`、型付きイベントペイロードをちょうど一つ、サイズ制限内の `metadata` が必要である。
 
+新しいレスポンスでは、出力する各イベントに任意の `time_state` と、利用可能な場合の `recorded_at` も報告する。\
+`recorded_at` はプロバイダーの記録時刻を正規化した UTC の RFC3339 時刻であり、操作の開始・終了時刻を推測したものではない。\
+`time_state` は、`recorded_at` がある場合は `available`、記録に時刻がない場合は `absent`、値を安全に利用できない場合は `unavailable`、時刻の意味に対応していない場合は `unsupported` とする。\
+後者の三つでは `recorded_at` を省略し、`scope: events` の `event_time_omitted` 省略理由に件数をまとめて、`events` を `partial` にする。\
+そのため、ソースの記録時刻を利用できなければ、従来は `complete` だったイベントのレスポンスが `partial` になる場合がある。\
+以前の `v1` レスポンスで `time_state` が省略されていても、`absent` を意味しない。
+
 対応する種別は次のとおりである。
 
 - `message`。\
   `role` と秘匿化された `text` を持つ。
 - `tool_call`。\
-  正規化された `call_id`、安全な操作 `category`、任意の `action` と `evidence_state` を持つ。
+  正規化された `call_id`、安全な操作 `category`、任意の `action`、`evidence_state`、`input_state` を持つ。
 - `tool_result`。\
   関連する `call_id` と `success`、任意の `exit_code`、`excerpt`、`evidence_state`、`redacted`、`truncated` を持つ。
 - `error`。\
@@ -176,6 +183,12 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 プロバイダーアダプターは、重複、欠落、対応しない相関を、曖昧なイベント列として出力せず、省略として報告する。
 
 生のコマンドと生のツール引数は、公開イベントモデルに含めない。
+
+`input_state` は、確認済みのプロバイダー入力フィールドの有無だけを示し、意味のある要求が含まれるかは示さない。\
+フィールドが存在すれば空のオブジェクトや配列でも `withheld`、確認済みの形式で存在しないことが分かれば `absent`、有無を安全に判定できなければ `unavailable`、値の形式を安全に解釈できなければ `unsupported` とする。\
+生の入力は公開せず、`withheld` だけでは完全性を下げない。\
+`unavailable` と `unsupported` は、`scope: tool_call` の `tool_input_unavailable` 省略理由に件数をまとめる。\
+以前の `v1` レスポンスで `input_state` が省略されていても、`absent` を意味しない。
 
 `evidence_state` は、以前の `v1` レスポンスとの互換性のために任意である。\
 省略された場合は証拠の状態が報告されていないことを意味し、利用者は `absent` と解釈してはならない。\

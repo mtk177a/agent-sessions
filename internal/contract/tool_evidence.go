@@ -7,6 +7,28 @@ import (
 
 const MaxToolExcerptBytes = 512
 
+func ValidInputState(state InputState) bool {
+	switch state {
+	case InputAbsent, InputWithheld, InputUnavailable, InputUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+func ToolInputOmissions(events []Event) []Omission {
+	count := 0
+	for _, event := range events {
+		if event.ToolCall != nil && (event.ToolCall.InputState == InputUnavailable || event.ToolCall.InputState == InputUnsupported) {
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	return []Omission{{Code: "tool_input_unavailable", Scope: "tool_call", Count: count, Message: "A tool call input could not be classified safely."}}
+}
+
 var safeCountLine = regexp.MustCompile(`^([0-9]{1,12}) (tests?|checks?|assertions?|errors?|failures?|warnings?) (passed|failed|skipped|found)$`)
 
 // SafeToolExcerpt constructs a bounded excerpt from a deliberately narrow line grammar.

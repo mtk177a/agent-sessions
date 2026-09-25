@@ -150,6 +150,11 @@ func boundSource(source *Source) (bool, error) {
 }
 
 func boundEvent(event *Event) (bool, error) {
+	for _, value := range []string{event.RecordedAt, string(event.TimeState)} {
+		if err := requireBoundedString(value); err != nil {
+			return false, err
+		}
+	}
 	changed := false
 	if len(event.Metadata) > MaxMetadata {
 		event.Metadata = event.Metadata[:MaxMetadata]
@@ -182,6 +187,9 @@ func boundEvent(event *Event) (bool, error) {
 			return false, err
 		}
 		if err := requireBoundedString(string(event.ToolCall.EvidenceState)); err != nil {
+			return false, err
+		}
+		if err := requireBoundedString(string(event.ToolCall.InputState)); err != nil {
 			return false, err
 		}
 	}

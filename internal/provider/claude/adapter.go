@@ -464,9 +464,6 @@ func makeSource(source config.Source, candidates []artifact) contract.Source {
 func normalizeRows(sessionID string, data []byte) ([]contract.Event, []contract.Omission) {
 	events := []contract.Event{}
 	omissions := []contract.Omission{}
-	calls := map[string]string{}
-	results := map[string]struct{}{}
-	invalidCalls := map[string]struct{}{}
 	currentTimestamp := ""
 	appendEvent := func(event contract.Event) {
 		contract.SetEventTime(&event, currentTimestamp)
@@ -523,14 +520,14 @@ func normalizeRows(sessionID string, data []byte) ([]contract.Event, []contract.
 				omissions = append(omissions, omission("malformed_record", "events", "A Claude user message could not be decoded."))
 				continue
 			}
-			normalizeUserPayload(payload, sessionID, &events, &omissions, calls, results, invalidCalls, appendEvent)
+			normalizeUserPayload(payload, sessionID, &events, &omissions, appendEvent)
 		case "assistant":
 			payload, ok := decodeMessage(row.Message, "assistant")
 			if !ok {
 				omissions = append(omissions, omission("malformed_record", "events", "A Claude assistant message could not be decoded."))
 				continue
 			}
-			normalizeAssistantPayload(payload, row.IsAPIErrorMessage, sessionID, &omissions, calls, invalidCalls, appendEvent)
+			normalizeAssistantPayload(payload, row.IsAPIErrorMessage, sessionID, &omissions, appendEvent)
 		case "system":
 			if row.Subtype != "turn_duration" && row.Subtype != "compact_boundary" {
 				omissions = append(omissions, omission("unsupported_event", "events", "A Claude system observation is not represented by the public event model."))
@@ -542,18 +539,11 @@ func normalizeRows(sessionID string, data []byte) ([]contract.Event, []contract.
 	if scanner.Err() != nil {
 		omissions = append(omissions, omission("resource_limit", "events", "A Claude JSONL row exceeded the input limit."))
 	}
-	for providerID, callID := range calls {
-		if _, invalid := invalidCalls[providerID]; invalid {
-			continue
-		}
-		if _, done := results[providerID]; !done && callID != "" {
-			omissions = append(omissions, omission("correlation_omitted", "events", "A Claude tool call did not have a uniquely correlated persisted result."))
-		}
-	}
+	omissions = append(omissions, contract.ResolveToolCorrelations(events)...)
 	return events, omissions
 }
 
-func normalizeUserPayload(payload messagePayload, sessionID string, events *[]contract.Event, omissions *[]contract.Omission, calls map[string]string, results map[string]struct{}, invalidCalls map[string]struct{}, appendEvent func(contract.Event)) {
+func normalizeUserPayload(payload messagePayload, sessionID string, events *[]contract.Event, omissions *[]contract.Omission, appendEvent func(contract.Event)) {
 	before := len(*events)
 	if text, ok := decodeStringContent(payload.Content); ok {
 		if text != "" {
@@ -583,39 +573,24 @@ func normalizeUserPayload(payload messagePayload, sessionID string, events *[]co
 			}
 		case "tool_result":
 			flushText()
-			if block.ToolUseID == "" {
-				*omissions = append(*omissions, omission("correlation_omitted", "events", "A Claude tool result lacked a provider correlation identifier."))
-				continue
-			}
-			callID, exists := calls[block.ToolUseID]
-			_, invalid := invalidCalls[block.ToolUseID]
-			if !exists || invalid {
-				*omissions = append(*omissions, omission("correlation_omitted", "events", "A Claude tool result did not reference an earlier unique call."))
-				continue
-			}
-			if _, duplicate := results[block.ToolUseID]; duplicate {
-				*omissions = append(*omissions, omission("duplicate_result", "events", "A Claude provider tool result was duplicated."))
-				continue
-			}
 			success, valid := toolResultSuccess(block.IsErrorRaw)
-			if !valid {
+			outcome := "unknown"
+			if valid {
+				if success {
+					outcome = "success"
+				} else {
+					outcome = "failure"
+				}
+			} else {
 				*omissions = append(*omissions, omission("malformed_record", "events", "A Claude tool result had an invalid error marker."))
-				continue
 			}
-			results[block.ToolUseID] = struct{}{}
-			body, present, omitted, unsupported := claudeToolBody(block.Content)
-			excerpt, state, redacted, truncated := contract.SafeToolExcerpt(body, present)
-			if omitted && state == contract.EvidenceAbsent {
-				state = contract.EvidenceUnavailable
+			content, state := claudeResultContent(block.Content)
+			id := ""
+			if block.ToolUseID != "" {
+				id = normalizedCallID(sessionID, block.ToolUseID)
 			}
-			if unsupported && state != contract.EvidenceAvailable {
-				state = contract.EvidenceUnsupported
-			} else if unsupported {
-				redacted = true
-			}
-			outcome := contract.ToolResultEvent{CallID: callID, Success: success, Excerpt: excerpt, EvidenceState: state, Redacted: redacted || omitted, Truncated: truncated}
-			appendEvent(contract.Event{Kind: contract.EventToolResult, ToolResult: &outcome, Metadata: []contract.Metadata{}})
-			*omissions = append(*omissions, contract.ToolResultOmissions(outcome)...)
+			result := contract.ToolResultEvent{CallID: id, Outcome: outcome, Content: content, ContentState: state}
+			appendEvent(contract.Event{Kind: contract.EventToolResult, ToolResult: &result, Metadata: []contract.Metadata{}})
 		case "image", "document", "tool_reference":
 			flushText()
 			*omissions = append(*omissions, omission("unsupported_content", "events", "A Claude user message contained content that is not represented by the public text model."))
@@ -630,7 +605,7 @@ func normalizeUserPayload(payload messagePayload, sessionID string, events *[]co
 	}
 }
 
-func normalizeAssistantPayload(payload messagePayload, apiError bool, sessionID string, omissions *[]contract.Omission, calls map[string]string, invalidCalls map[string]struct{}, appendEvent func(contract.Event)) {
+func normalizeAssistantPayload(payload messagePayload, apiError bool, sessionID string, omissions *[]contract.Omission, appendEvent func(contract.Event)) {
 	blocks, ok := decodeBlocks(payload.Content)
 	if !ok {
 		*omissions = append(*omissions, omission("malformed_record", "events", "A Claude assistant message content value could not be decoded."))
@@ -672,18 +647,18 @@ func normalizeAssistantPayload(payload messagePayload, apiError bool, sessionID 
 			}
 		case "tool_use":
 			flushText()
-			if block.ID == "" || block.Name == "" {
-				*omissions = append(*omissions, omission("correlation_omitted", "events", "A Claude tool call lacked a correlation identifier or name."))
-				continue
+			id := ""
+			if block.ID != "" {
+				id = normalizedCallID(sessionID, block.ID)
 			}
-			if _, duplicate := calls[block.ID]; duplicate {
-				invalidCalls[block.ID] = struct{}{}
-				*omissions = append(*omissions, omission("duplicate_call_id", "events", "A Claude provider tool call identifier was duplicated."))
-				continue
+			input, state := contract.RecordedContent(block.Input)
+			// Claude's verified tool input shape is an object, including an empty object.
+			if len(block.Input) != 0 && bytes.TrimSpace(block.Input)[0] != '{' {
+				input = nil
+				state = contract.EvidenceUnsupported
 			}
-			callID := normalizedCallID(sessionID, block.ID)
-			calls[block.ID] = callID
-			appendEvent(contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: toolCategory(block.Name), Action: toolAction(block.Name), EvidenceState: contract.EvidenceAvailable, InputState: claudeInputState(block.Input)}, Metadata: []contract.Metadata{}})
+			appendEvent(contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: id, Name: block.Name, Category: toolCategory(block.Name), Action: toolAction(block.Name), InputState: contract.InputState(state), Input: input}, Metadata: []contract.Metadata{}})
+
 			emittedTool = true
 		case "thinking", "redacted_thinking":
 			flushText()
@@ -699,17 +674,6 @@ func normalizeAssistantPayload(payload messagePayload, apiError bool, sessionID 
 	}
 }
 
-func claudeInputState(raw json.RawMessage) contract.InputState {
-	if len(raw) == 0 {
-		return contract.InputAbsent
-	}
-	raw = bytes.TrimSpace(raw)
-	if raw[0] != '{' {
-		return contract.InputUnsupported
-	}
-	return contract.InputWithheld
-}
-
 func decodeMessage(raw json.RawMessage, role string) (messagePayload, bool) {
 	var payload messagePayload
 	if len(raw) == 0 || json.Unmarshal(raw, &payload) != nil || payload.Role != role || len(payload.Content) == 0 {
@@ -719,6 +683,9 @@ func decodeMessage(raw json.RawMessage, role string) (messagePayload, bool) {
 }
 
 func decodeStringContent(raw json.RawMessage) (string, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '"' {
+		return "", false
+	}
 	var text string
 	if json.Unmarshal(raw, &text) != nil {
 		return "", false
@@ -778,38 +745,6 @@ func toolAction(name string) string {
 	default:
 		return "invoke"
 	}
-}
-
-func claudeToolBody(raw json.RawMessage) (string, bool, bool, bool) {
-	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return "", false, false, false
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		return text, true, false, false
-	}
-	var blocks []json.RawMessage
-	if json.Unmarshal(raw, &blocks) != nil {
-		return "", false, false, true
-	}
-	texts := []string{}
-	omitted := false
-	for _, rawBlock := range blocks {
-		var block struct {
-			Type string  `json:"type"`
-			Text *string `json:"text"`
-		}
-		if json.Unmarshal(rawBlock, &block) != nil || block.Type != "text" {
-			omitted = true
-			continue
-		}
-		if block.Text == nil {
-			omitted = true
-			continue
-		}
-		texts = append(texts, *block.Text)
-	}
-	return strings.Join(texts, "\n"), len(texts) > 0, omitted, false
 }
 
 func knownObservationRow(value string) bool {
@@ -875,3 +810,40 @@ func hasOmissionCode(omissions []contract.Omission, code string) bool {
 }
 
 var _ provider.Adapter = (*Adapter)(nil)
+
+func claudeResultContent(raw json.RawMessage) (*contract.Content, contract.EvidenceState) {
+	if len(raw) == 0 {
+		return nil, contract.EvidenceAbsent
+	}
+	if text, ok := decodeStringContent(raw); ok {
+		return contract.TextContent(text), contract.EvidenceAvailable
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(raw, &blocks) != nil || blocks == nil {
+		return nil, contract.EvidenceUnsupported
+	}
+	texts := []string{}
+	omitted := false
+	for _, rawBlock := range blocks {
+		var block struct {
+			Type string  `json:"type"`
+			Text *string `json:"text"`
+		}
+		if json.Unmarshal(rawBlock, &block) != nil || block.Type != "text" || block.Text == nil {
+			omitted = true
+			continue
+		}
+		texts = append(texts, *block.Text)
+	}
+	if len(texts) == 0 && omitted {
+		return nil, contract.EvidenceUnavailable
+	}
+	var content *contract.Content
+	if len(texts) == 1 {
+		content = contract.TextContent(texts[0])
+	} else {
+		content = contract.JSONContent(texts)
+	}
+	content.Omitted = omitted
+	return content, contract.EvidenceAvailable
+}

@@ -2,7 +2,7 @@
 
 The `claude` provider adapter reads Claude Code session records directly from a Claude Code configuration root without starting Claude Code.
 
-It maps the compatibility boundary below into the provider-neutral stable `v1` CLI contract.\
+It maps the compatibility boundary below into the provider-neutral stable `v2` CLI contract.\
 The transcript JSONL format remains adapter-internal and is not part of that public schema.
 
 ## Discovery boundary
@@ -54,17 +54,19 @@ Forward-compatible interaction-time decoding does not expand the versions consid
 Tool call identifiers are deterministic adapter-owned hashes of the session identity and provider correlation identifier.\
 Results are related to calls only through the explicit `tool_use_id` value.
 
-Duplicate calls, duplicate results, unmatched results, and calls without persisted results prevent `complete`.\
-The result `success` value is derived only from the verified `tool_result.is_error` semantics: absent or `false` means success, and `true` means failure.
+Duplicate calls and results, unmatched results, and calls without persisted results prevent `complete`.\
+Readable bodies are retained, and explicit unique `tool_use_id` relationships may cross record order.\
+Result `outcome` uses verified `tool_result.is_error` semantics: absent or `false` means success, `true` means failure, and an invalid value means unknown with its body retained.
 
-Public tool categories are limited to `shell`, `filesystem`, `file_change`, `mcp`, and `tool`.\
-Known tool names map to `execute`, `read`, `search`, `write`, or `edit`; other confirmed calls map to `invoke`.\
-String and text-block tool results use the common safe excerpt policy; non-text blocks and unsafe lines are excluded and reduce completeness.\
-Raw commands, tool input, unrestricted tool output, arbitrary provider tool names, provider correlation identifiers, and absolute paths are not exposed as public structural values.
+Public categories remain `shell`, `filesystem`, `file_change`, `mcp`, and `tool`.\
+Known tool names map to `execute`, `read`, `search`, `write`, or `edit`; other calls map to `invoke`.\
+The recorded `name` and object-valued `input` are returned.\
+Input is `available` even for an empty object, `absent` for a missing field, and `unsupported` for an unsupported value.\
+String and text-block results are returned without line filtering; multiple text blocks become an ordered JSON array.\
+Excluded non-text content is reported while readable text is retained.\
+Each entire input or result is bounded to 64 KiB without automatic content redaction.
 
-Each emitted event uses its transcript row's timestamp; multiple events from one row therefore share `recorded_at`.\
-A `tool_use` block with an object-valued `input` field reports `input_state: withheld`, including an empty object.\
-A missing field reports `absent`, while an unsupported value reports `unsupported`.
+Events use their transcript row's timestamp, so events from one row share `recorded_at`.
 
 ## Subagents and sidecars
 

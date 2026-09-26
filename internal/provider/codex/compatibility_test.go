@@ -53,7 +53,7 @@ func TestCanonicalizedLegacyToolCorrelationCrossesHistorySpans(t *testing.T) {
 		withOrdinal(3, `{"timestamp":"2026-09-03T10:00:01Z","type":"response_item","payload":{"type":"function_call_output","call_id":"fictional-call"}}`),
 	})
 	result := New().Events(context.Background(), testSource(home), contract.SourceFingerprint(secondThreadID))
-	if len(result.Events) != 1 || result.Events[0].ToolCall == nil || !hasOmission(result.Omissions, "unsupported_tool_result") || hasOmission(result.Omissions, "correlation_omitted") {
+	if len(result.Events) != 2 || result.Events[0].ToolCall == nil || !hasOmission(result.Omissions, "tool_outcome_unknown") || hasOmission(result.Omissions, "correlation_omitted") {
 		t.Fatalf("Events() = %#v", result)
 	}
 }
@@ -67,7 +67,7 @@ func TestCanonicalizedLegacyEventsUseRawToolRows(t *testing.T) {
 		withOrdinal(3, `{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"fictional-completed","status":"completed"}}}`),
 	})
 	result := New().Events(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
-	if len(result.Events) != 1 || result.Events[0].ToolCall == nil || result.Events[0].ToolCall.Category != "shell" || !hasOmission(result.Omissions, "unsupported_tool_result") {
+	if len(result.Events) != 2 || result.Events[0].ToolCall == nil || result.Events[0].ToolCall.Category != "shell" || !hasOmission(result.Omissions, "tool_outcome_unknown") {
 		t.Fatalf("Events() = %#v", result)
 	}
 }

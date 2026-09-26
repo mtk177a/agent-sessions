@@ -131,7 +131,7 @@ func TestEventsFollowActiveBranchAndDescribeOmissions(t *testing.T) {
 	}
 
 	tool := adapter.Events(t.Context(), source, contract.SourceFingerprint("conversation-b"))
-	if tool.Status != contract.StatusPartial || len(tool.Events) != 1 || !hasOmission(tool.Omissions, "correlation_omitted") {
+	if tool.Status != contract.StatusPartial || len(tool.Events) != 2 || !hasOmission(tool.Omissions, "correlation_omitted") {
 		t.Fatalf("tool result handling is not explicit: %#v", tool)
 	}
 }

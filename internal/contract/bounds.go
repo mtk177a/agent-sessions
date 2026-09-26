@@ -16,7 +16,7 @@ var ErrStructuralStringBound = errors.New("structural output string exceeds boun
 
 func EnforceBounds(envelope *Envelope) error {
 	changed := false
-	for _, value := range []string{envelope.SchemaVersion, envelope.RedactionPolicyVersion, envelope.Operation, string(envelope.Status)} {
+	for _, value := range []string{envelope.SchemaVersion, envelope.Operation, string(envelope.Status)} {
 		if err := requireBoundedString(value); err != nil {
 			return err
 		}
@@ -174,7 +174,10 @@ func boundEvent(event *Event) (bool, error) {
 		if err := requireBoundedString(event.Message.Role); err != nil {
 			return false, err
 		}
-		changed = boundString(&event.Message.Text) || changed
+		if boundString(&event.Message.Text) {
+			event.Message.Truncated = true
+			changed = true
+		}
 	}
 	if event.ToolCall != nil {
 		if err := requireBoundedString(event.ToolCall.CallID); err != nil {
@@ -186,24 +189,23 @@ func boundEvent(event *Event) (bool, error) {
 		if err := requireBoundedString(event.ToolCall.Action); err != nil {
 			return false, err
 		}
-		if err := requireBoundedString(string(event.ToolCall.EvidenceState)); err != nil {
-			return false, err
-		}
 		if err := requireBoundedString(string(event.ToolCall.InputState)); err != nil {
 			return false, err
 		}
+		if err := requireBoundedString(event.ToolCall.Name); err != nil {
+			return false, err
+		}
+		changed = boundContent(event.ToolCall.Input) || changed
 	}
 	if event.ToolResult != nil {
-		if err := requireBoundedString(event.ToolResult.CallID); err != nil {
-			return false, err
+		for _, value := range []string{event.ToolResult.CallID, event.ToolResult.Outcome, event.ToolResult.CorrelationState, string(event.ToolResult.ContentState)} {
+			if err := requireBoundedString(value); err != nil {
+				return false, err
+			}
 		}
-		if err := requireBoundedString(string(event.ToolResult.EvidenceState)); err != nil {
-			return false, err
-		}
-		if len(event.ToolResult.Excerpt) > MaxToolExcerptBytes {
-			return false, ErrStructuralStringBound
-		}
+		changed = boundContent(event.ToolResult.Content) || changed
 	}
+
 	if event.Error != nil {
 		if err := requireBoundedString(event.Error.Category); err != nil {
 			return false, err
@@ -244,4 +246,12 @@ func boundString(value *string) bool {
 	}
 	*value = string(valid)
 	return true
+}
+
+func boundContent(content *Content) bool {
+	if content != nil && boundString(&content.Text) {
+		content.Truncated = true
+		return true
+	}
+	return false
 }

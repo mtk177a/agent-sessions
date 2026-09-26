@@ -6,16 +6,15 @@
 
 ## 互換性の状態
 
-公開レスポンススキーマは安定版 `v1` である。\
+公開レスポンススキーマは安定版 `v2` である。\
 同じ仕様を、実運用の Codex、Claude Code、ChatGPT Data Export アダプターが実装する。
 
 `list` の最小で完全なレスポンスは次のとおりである。
 
 ```json
 {
-  "schema_version": "v1",
+  "schema_version": "v2",
   "cli_version": "dev",
-  "redaction_policy_version": "v1",
   "operation": "list",
   "status": "complete",
   "data": {
@@ -35,9 +34,8 @@
 
 | フィールド | 出現規則 |
 | --- | --- |
-| `schema_version` | 必須。この仕様では常に `v1`。 |
+| `schema_version` | 必須。この仕様では常に `v2`。 |
 | `cli_version` | 必須。実行ファイルのビルドを識別し、`dev` の場合がある。 |
-| `redaction_policy_version` | 必須。現在のポリシーでは常に `v1`。 |
 | `operation` | 必須。`list`、`show`、`events`、`verify`、またはコマンドレベルエラー用の `cli` のいずれか。 |
 | `status` | 必須。以下の完全性状態のいずれか。 |
 | `data` | `complete` と `partial` の操作結果では必須。`unsupported` と `error` では存在しない。 |
@@ -48,9 +46,9 @@
 ### 互換性規則
 
 利用者は、`data` やその他のバージョン依存フィールドを解釈する前に、`schema_version` を読み取り検証しなければならない。\
-この仕様を実装する利用者は `v1` を受け付け、未知のメジャーバージョンを拒否する。
+この仕様を実装する利用者は `v2` を受け付け、未知のメジャーバージョンを拒否する。
 
-追加の任意フィールドは `v1` の中で導入でき、利用者はスキーマのメジャーバージョンを受け入れた後、未知のレスポンスフィールドを無視しなければならない。\
+追加の任意フィールドは `v2` の中で導入でき、利用者はスキーマのメジャーバージョンを受け入れた後、未知のレスポンスフィールドを無視しなければならない。\
 必須フィールドの削除や変更、既存フィールドの意味の変更、状態、イベント種別、終了コード、論理識別子の規則、その他の必須意味の非互換な変更には、新しいメジャースキーマバージョンが必要である。
 
 `cli_version` は実行ファイルのバージョンを示し、レスポンススキーマを選択するものではない。\
@@ -112,7 +110,7 @@
 
 ソースの `kind` は拡張可能なトークンである。\
 現在出力する値は、Codex と Claude Code の記録では `session`、ChatGPT Data Export の会話では `conversation` である。\
-利用者は、ソースが認識していない `kind` トークンを使っているというだけで、その他は有効な `v1` レスポンスを拒否してはならない。
+利用者は、ソースが認識していない `kind` トークンを使っているというだけで、その他は有効な `v2` レスポンスを拒否してはならない。
 
 存在する場合、`version_hint` には `kind` と `value` が必要で、`kind` も拡張可能である。\
 継承履歴のない Codex ソースと Claude Code は安価な変更検出のために `stat_hash` を出力する。\
@@ -151,69 +149,73 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 そのため、この参照は生のネイティブ ID やファイルシステムの場所を埋め込まずに決定的なままである。
 
 `identity` オブジェクトには `provider`、`source_instance`、`provider_source_fingerprint`、`source_ref` が必要である。\
-任意の `provider_native_source_id` には、最終的な秘匿化によって安全に保持できる場合に、プロバイダーが所有する論理 ID を含める。\
-生の値を省略または秘匿化した場合でも、フィンガープリントとソース参照は利用できる。
+任意の `provider_native_source_id` には、出力上限内でプロバイダーが所有する論理 ID を含める。\
+生の値を省略した場合でも、フィンガープリントとソース参照は利用できる。
 
 `as0` プレフィックスとソースフィンガープリントの `v0` ドメイン区切り文字は、`schema_version` とは独立してバージョン管理する。\
-公開レスポンススキーマが `v1` に達したというだけで、これらを変更することはない。
+公開レスポンススキーマが `v2` に達したというだけで、これらを変更することはない。
 
 ## イベント
 
-各イベントには `index`、`kind`、型付きイベントペイロードをちょうど一つ、サイズ制限内の `metadata` が必要である。
+各イベントには `index`、`kind`、種類に対応する本文一つ、サイズ制限内の `metadata` が必要である。
 
-新しいレスポンスでは、出力する各イベントに任意の `time_state` と、利用可能な場合の `recorded_at` も報告する。\
-`recorded_at` はプロバイダーの記録時刻を正規化した UTC の RFC3339 時刻であり、操作の開始・終了時刻を推測したものではない。\
-`time_state` は、`recorded_at` がある場合は `available`、記録に時刻がない場合は `absent`、値を安全に利用できない場合は `unavailable`、時刻の意味に対応していない場合は `unsupported` とする。\
-後者の三つでは `recorded_at` を省略し、`scope: events` の `event_time_omitted` 省略理由に件数をまとめて、`events` を `partial` にする。\
-そのため、ソースの記録時刻を利用できなければ、従来は `complete` だったイベントのレスポンスが `partial` になる場合がある。\
-以前の `v1` レスポンスで `time_state` が省略されていても、`absent` を意味しない。
+イベントは `time_state` と、確認できた場合に正規の UTC RFC 3339 形式の `recorded_at` を返す。\
+日時はプロバイダーの記録に属し、操作の開始や終了を推測したものではない。\
+`time_state` は `available`、`absent`、`unavailable`、`unsupported` のいずれかで、`available` の場合だけ `recorded_at` を含める。\
+日時がない場合や利用できない場合は `event_time_omitted` を追加し、`events` を `partial` にする。
 
-対応する種別は次のとおりである。
+対応する種類は次のとおりである。
 
-- `message`。\
-  `role` と秘匿化された `text` を持つ。
-- `tool_call`。\
-  正規化された `call_id`、安全な操作 `category`、任意の `action`、`evidence_state`、`input_state` を持つ。
-- `tool_result`。\
-  関連する `call_id` と `success`、任意の `exit_code`、`excerpt`、`evidence_state`、`redacted`、`truncated` を持つ。
-- `error`。\
-  安全な `category` と秘匿化された `message` を持つ。
+- `message`: `role`（`user` または `assistant`）、記録された `text`、真偽値の `truncated`。
+- `tool_call`: 任意の `call_id` と記録された `name`、必須の `category` と `input_state`、任意の `action` と `input`。
+- `tool_result`: 必須の `outcome`、`correlation_state`、`content_state`、任意の `call_id`、`exit_code`、`content`。
+- `error`: `category` と、記録されたプロバイダーエラーの `message`。
 
-ツール結果は、前に出現した一意なツール呼び出し一つを参照しなければならず、一つの呼び出しを参照できる正規化済みの結果は最大一つである。\
-プロバイダーアダプターは、重複、欠落、対応しない相関を、曖昧なイベント列として出力せず、省略として報告する。
+### 記録された内容
 
-生のコマンドと生のツール引数は、公開イベントモデルに含めない。
+`input` と `content` は共通の表現を使う。
 
-`input_state` は、確認済みのプロバイダー入力フィールドの有無だけを示し、意味のある要求が含まれるかは示さない。\
-フィールドが存在すれば空のオブジェクトや配列でも `withheld`、確認済みの形式で存在しないことが分かれば `absent`、有無を安全に判定できなければ `unavailable`、値の形式を安全に解釈できなければ `unsupported` とする。\
-生の入力は公開せず、`withheld` だけでは完全性を下げない。\
-`unavailable` と `unsupported` は、`scope: tool_call` の `tool_input_unavailable` 省略理由に件数をまとめる。\
-以前の `v1` レスポンスで `input_state` が省略されていても、`absent` を意味しない。
+```json
+{"format":"json","text":"[\"go\",\"test\",\"./...\"]","truncated":false}
+```
 
-`evidence_state` は、以前の `v1` レスポンスとの互換性のために任意である。\
-省略された場合は証拠の状態が報告されていないことを意味し、利用者は `absent` と解釈してはならない。\
-`evidence_state` がないイベントには、`action`、`excerpt`、`redacted`、`truncated` も存在しない。
+`format` は `text` または `json`、`text` は常に文字列、`truncated` は必須の真偽値である。\
+任意の真偽値 `omitted` は、読める内容を残しながら非テキスト部分や未対応の部分を除外したことを示す。\
+JSON 本文は `truncated` が真でなければ有効な JSON であり、切り詰めた先頭部分は解析できないことがある。\
+JSON の整形やオブジェクトの項目順について元のバイト列の保持は保証しないが、制限内で文字列の値と配列の順序を保持する。\
+引数の配列は JSON 文字列内の配列として保持し、実行可能なコマンドへ連結しない。
 
-ツール呼び出しの `action` は `execute`、`read`、`search`、`write`、`edit`、`invoke` のいずれかである。\
-`invoke` はツールが呼び出されたことだけを表す。\
-`action` は `evidence_state` が `available` の場合だけ存在する。\
-ツール結果では、`available` は空でない安全な抜粋、`absent` はソースにテキスト本文がないこと、`unavailable` は本文があるが安全な抜粋を出せないこと、`unsupported` は本文の形式を安全に解釈できないことを表す。\
-同じ四つの状態をツール呼び出しにも使うが、現在のアダプターは正規化したすべての呼び出しに `action` を出力する。
+`input_state` と `content_state` は `available`、`absent`、`unavailable`、`unsupported` を使う。\
+`available` は対応する内容オブジェクトを必須とし、空文字列、空のオブジェクト、空の配列も含む。\
+それ以外の状態では内容オブジェクトを省略する。\
+`absent` は確認済みの形式で不在と分かること、`unavailable` は期待する情報の欠落や読み取り不能、`unsupported` は未対応の形式を表す。\
+`unavailable` と `unsupported` では `tool_input_unavailable` または `tool_content_unavailable` の省略理由を追加する。
 
-結果の抜粋には、行全体が認識できる `PASS`、`FAIL`、`OK`、`SUCCESS`、または 10 進数の件数と固定の対象語（`test`、`tests`、`check`、`checks`、`assertion`、`assertions`、`error`、`errors`、`failure`、`failures`、`warning`、`warnings`）および結果語（`passed`、`failed`、`skipped`、`found`）から成る行だけを含める。\
-デコーダーは固定語と最大 12 桁の 10 進数から行を再構成し、元の順序を保って、結果を 512 UTF-8 バイト以内に制限する。\
-任意の結果本文、構造化された値、名前、パス、コマンド、引数はコピーしない。\
-`redacted` は条件に合わず除外された内容、`truncated` は抜粋の上限で除外された安全な行を表す。\
-これらのフラグ、および `unavailable` または `unsupported` の結果には `tool_result` 範囲の省略を追加し、`complete` にしない。\
-本文がないことだけでは省略としない。
+道具の名前と JSON の入力・結果の項目名は製品固有の値であり、共通の道具の仕様ではない。\
+記録された名前がない場合は項目を省略し、`tool_name_unavailable` を報告する。\
+`category` は大まかな分類を維持し、`action` がある場合は `execute`、`read`、`search`、`write`、`edit`、`invoke` のいずれかである。
 
-正規化した呼び出し ID は、`schema_version` とは独立した、アダプターが所有する `v0` アルゴリズム名前空間を使う。\
-プロバイダーの相関識別子は、公開する呼び出し ID ではない。
+### 成否と対応付け
+
+`outcome` は `success`、`failure`、`unknown` のいずれかである。\
+成功・失敗は、意味を確認したプロバイダーの明示的な項目だけで確定し、`PASS` やエラーらしい文章では判定しない。\
+`unknown` でも読める本文を保持し、`tool_outcome_unknown` を追加する。
+
+`correlation_state` は `matched`、`unmatched`、`ambiguous` のいずれかである。\
+`matched` では、選択した論理履歴内の明示的な相関識別子により、呼び出しと結果を一対一に確定できることを必須とし、この状態だけ結果に `call_id` を含める。\
+結果が呼び出しより先に記録されていたり、別のページに現れたりしてもよい。\
+`unmatched` は対応する呼び出しを確定できないこと、`ambiguous` は呼び出しまたは結果の識別子の重複で一意に対応できないことを表す。\
+どちらも本文を保持して結果の `call_id` を省略し、`correlation_omitted` を追加する。\
+識別子がない、または重複した呼び出しは `call_id` なしで保持し、結果の記録がない呼び出しも省略理由を報告する。\
+隣接する順序や同じ文章から関係を推測しない。
+
+対応付けはページ分割の前に、選択した履歴全体で行う。\
+正規化した呼び出し ID は応答の出力形式とは独立した、アダプターが所有する `v0` のアルゴリズム名前空間を維持し、生のプロバイダー相関識別子を公開する呼び出し ID にはしない。
 
 ## プロバイダー固有の情報
 
-プロバイダー固有の成果物の配置、行の種類、生のツール名、相関値は、所有するアダプターの内部に残す。\
-安全に公開でき、プロバイダーに依存しない意味を作り出さずに済むサイズ制限内のメタデータだけを、共通の `metadata` 配列に含めてもよい。
+プロバイダー固有の成果物の配置、行の種類、相関値は、所有するアダプターの内部に残す。\
+安全に公開でき、プロバイダーに依存しない意味を作り出さずに済むサイズ制限内のメタデータを、共通の `metadata` 配列に含めてもよい。
 
 アダプターは、忠実に表現できない重要な値を省略として報告する。\
 不安定なプロバイダーフィールドを安定したスキーマへ昇格させたり、同等の共通の意味を推測して `complete` としたりしない。
@@ -222,7 +224,7 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 
 | 状態 | 意味 |
 | --- | --- |
-| `complete` | 重要な値が省略、切り詰め、未対応、不明、安全でない秘匿化のいずれにもなっていない。 |
+| `complete` | 重要な値が省略、切り詰め、未対応、不明のいずれにもなっていない。 |
 | `partial` | 有用な出力はあるが、少なくとも一つの省略を報告している。 |
 | `unsupported` | プロバイダーまたは操作が仕様を安全に満たせない。 |
 | `error` | 操作が失敗し、構造化エラーを含む。 |
@@ -242,7 +244,7 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 
 ## 構造化エラーと終了コード
 
-構造化エラーには、トークン値の `code` と `category`、秘匿化された人間向けの `message`、Boolean の `retryable`、`details` 配列が必要である。\
+構造化エラーには、トークン値の `code` と `category`、固定の人間向けの `message`、Boolean の `retryable`、`details` 配列が必要である。\
 各詳細エントリには、トークン値の `name` と安全な文字列 `value` が必要で、配列は空でもよい。\
 現在の CLI エラーは再試行可能ではない。
 
@@ -256,7 +258,7 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 - `event_limit_exceeded`、`verification_failed`、`output_bound_exceeded`、`response_limit_exceeded`。
 - `invalid_result`。
 
-省略とエラーのコード集合は `v1` の中で増やせる。\
+省略とエラーのコード集合は `v2` の中で増やせる。\
 `schema_version` を受け入れた後、未知のコードに遭遇した利用者は、結果を `complete` と扱わず、宣言された未完了またはエラー状態を保持しなければならない。
 
 | 終了コード | 意味 |
@@ -316,7 +318,7 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 | JSON の入れ子 | 64 階層 |
 | ソース観測あたりのイベント | 100,000 |
 | 動的出力文字列 | 64 KiB |
-| ツール結果の抜粋 | 512 バイト |
+| 一つの発言・ツール入力・ツール結果の内容 | 64 KiB |
 | ソースまたはイベントあたりのメタデータエントリ | 64 |
 | ソースあたりの関係 | 64 |
 | ページサイズ | 既定 50、最大 100 |
@@ -332,13 +334,33 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 サイズ超過した生のプロバイダー固有ソース ID は省略するが、フィンガープリントとソース参照は保持する。\
 サイズ超過した構造上の識別子は、別の識別子へ切り詰めず、構造化されたリソースエラーとして安全側に失敗する。
 
-## 最終秘匿化
+## 内容の扱い
 
-すべての動的文字列は、JSON エンコードの直前に最終秘匿化を通る。\
-これには、ソースメタデータ、バージョンヒント、メッセージ、ツール結果の抜粋、エラーイベント、省略、構造化エラー、診断、ビルドバージョン文字列が含まれる。
+記録された内容は自動で隠さずに返し、認証情報らしい値、パス、接続先、コード、検索文字列、コマンドの文章を含むことがある。\
+内容を隠す切替設定はなく、`redaction_policy_version` は出力しない。\
+利用側が分析、保存、外部への共有に使う内容を決める。\
+CLI の診断には、基になったエラーや元の記録を不必要にコピーしない。\
+過去の内容は未検証のデータであり、実行したり現在の指示として扱ったりしない。
 
-`v1` ポリシーは、認証情報らしい値、認可値、Unix と Windows の絶対パス、UNC パス、ファイル URI、生のホスト名、コマンド形式のテキストを除去する。\
-重要な秘匿化を行った場合は `output_redacted` の省略を追加し、結果を完全な状態にできない。
+一つの内容全体を 64 KiB に制限し、複数の結果欄や文章ブロックがあっても上限を増やさない。\
+内容を切り詰めた場合は `truncated` と `tool_input_truncated` または `tool_content_truncated` を報告し、応答全体も `partial` にする。\
+共通の最終出力処理による切り詰めは `resource_truncation` を報告する。\
+非テキスト部分や未対応の部分を除外した場合は `unsupported_content` などの省略理由を報告する。\
+一つの本文の続きを取得する機能はない。
 
-プロバイダーのルート、生のコマンド、生のツール引数は、この最終処理の前に除外する。\
-安全な操作カテゴリ、成功または失敗、終了コード、呼び出しと結果の関係は、構造化された証拠として保持する。
+JSON エンコード後に応答が 8 MiB を超える場合は `response_limit_exceeded` を返し、部分的な JSON を出力しない。\
+ページ分割する操作では、同じ取得位置で `--limit` を減らして再試行できる。\
+同じ要求をそのまま再試行しても解決しないため、`retryable` は偽のままである。\
+一つの本文自体の切り詰めは、件数を減らしても回復しない。\
+元の記録が取得の間に変わると、位置に基づくページ分割では一定の記録の完全取得を保証できない。\
+同じ元データと実行ファイルで取得し、必要に応じて前後の検証済みバージョンを比較する。
+
+## v1 からの移行
+
+v2 は自動の内容隠蔽の保証を削除し、入力、結果、成否不明、対応先不明を表す。\
+`success`、`excerpt`、`redacted`、`evidence_state` は新しい項目へ置き換え、`input_state: withheld` は `available` と実際の `input` に置き換える。\
+新しい実行ファイルに v1 の出力を選ぶ機能はない。
+
+利用側は v2 の受け入れ、入力と結果の読み取り、不明と省略の扱い、保存と共有の範囲を確認してから、固定した実行ファイルを更新する。\
+v1 が必要な場合や問題が出た場合は、以前の実行ファイルを利用できる。\
+設定ファイルの `schema_version: v1`、コマンドと引数、ソース参照、検証用ハッシュの方式は変わらない。

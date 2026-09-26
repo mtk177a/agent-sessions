@@ -58,7 +58,7 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 			if envelope.Operation != tc.wantOperation || envelope.Status != tc.wantStatus {
 				t.Fatalf("unexpected envelope: %#v", envelope)
 			}
-			if envelope.SchemaVersion != "v1" || envelope.RedactionPolicyVersion != "v1" || envelope.Omissions == nil {
+			if envelope.SchemaVersion != "v2" || envelope.Omissions == nil {
 				t.Fatalf("stable envelope fields are missing: %#v", envelope)
 			}
 			switch tc.name {
@@ -97,7 +97,7 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := *eventEnvelope.Data.Events
-	if events[1].ToolCall.CallID != "call-1" || events[1].ToolCall.Action != "read" || events[1].ToolCall.EvidenceState != contract.EvidenceAvailable || events[2].ToolResult.CallID != "call-1" || !events[2].ToolResult.Success || events[2].ToolResult.ExitCode == nil || *events[2].ToolResult.ExitCode != 0 || events[2].ToolResult.EvidenceState != contract.EvidenceAbsent {
+	if events[1].ToolCall.CallID != "call-1" || events[1].ToolCall.Action != "read" || events[2].ToolResult.CallID != "call-1" || events[2].ToolResult.Outcome != "success" || events[2].ToolResult.ExitCode == nil || *events[2].ToolResult.ExitCode != 0 || events[2].ToolResult.ContentState != contract.EvidenceAbsent {
 		t.Fatalf("tool relationship evidence was not preserved: %#v", events)
 	}
 
@@ -107,35 +107,11 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 	}
 }
 
-func TestEventsAcceptLegacyV1ToolEvidence(t *testing.T) {
-	root := t.TempDir()
-	configPath := filepath.Join(root, "config.json")
-	configJSON := `{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
-	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	adapter := newSyntheticAdapter()
-	adapter.events[1].ToolCall.Action = ""
-	adapter.events[1].ToolCall.EvidenceState = ""
-	adapter.events[2].ToolResult.EvidenceState = ""
-	runner := Runner{Version: "test", Registry: provider.NewRegistry(adapter)}
-	var output bytes.Buffer
-	if exit := runner.Run(context.Background(), []string{"events", "--config", configPath, adapter.source.Identity.SourceRef}, &output); exit != ExitOK {
-		t.Fatalf("legacy v1 events exit=%d output=%s", exit, output.String())
-	}
-	var envelope contract.Envelope
-	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.SchemaVersion != "v1" || envelope.Status != contract.StatusComplete || len(envelope.Omissions) != 0 {
-		t.Fatalf("legacy v1 events changed the envelope: %#v", envelope)
-	}
-	events := *envelope.Data.Events
-	if events[1].ToolCall.EvidenceState != "" || events[2].ToolResult.EvidenceState != "" {
-		t.Fatalf("missing evidence states were inferred: %#v", events)
-	}
-	if strings.Contains(output.String(), `"evidence_state"`) {
-		t.Fatalf("missing evidence states were serialized: %s", output.String())
+func TestEventsRejectMissingV2ContentState(t *testing.T) {
+	events := newSyntheticAdapter().events
+	events[1].ToolCall.InputState = ""
+	if err := normalizeAndValidateEvents(events); err == nil {
+		t.Fatal("v1-style missing input state accepted")
 	}
 }
 
@@ -355,7 +331,7 @@ func TestDiagnosticDoesNotExposeExplicitConfigPath(t *testing.T) {
 	}
 }
 
-func TestFallbackEnvelopeIsBoundedAndRedacted(t *testing.T) {
+func TestFallbackEnvelopeDoesNotCopyInvalidProviderData(t *testing.T) {
 	runner := Runner{Version: `token: "opaque-fictional-value"`}
 	envelope := contract.NewEnvelope("events", runner.Version, contract.Status("bogus"))
 	var output bytes.Buffer
@@ -363,8 +339,8 @@ func TestFallbackEnvelopeIsBoundedAndRedacted(t *testing.T) {
 	if exit != ExitFailure {
 		t.Fatalf("exit=%d output=%s", exit, output.String())
 	}
-	if bytes.Contains(output.Bytes(), []byte("opaque-fictional-value")) {
-		t.Fatalf("fallback envelope exposed credential: %s", output.String())
+	if !bytes.Contains(output.Bytes(), []byte("opaque-fictional-value")) {
+		t.Fatalf("fallback envelope unexpectedly changed CLI version: %s", output.String())
 	}
 	var decoded contract.Envelope
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
@@ -527,8 +503,8 @@ func newSyntheticAdapter() *syntheticAdapter {
 		},
 		events: []contract.Event{
 			{Index: 0, Kind: contract.EventMessage, Message: &contract.MessageEvent{Role: "user", Text: "Hello"}, Metadata: []contract.Metadata{}},
-			{Index: 1, Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "filesystem", Action: "read", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},
-			{Index: 2, Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true, ExitCode: &exitCode, EvidenceState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
+			{Index: 1, Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "filesystem", Action: "read", InputState: contract.InputAbsent, Name: "fictional"}, Metadata: []contract.Metadata{}},
+			{Index: 2, Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Outcome: "success", CorrelationState: "matched", ExitCode: &exitCode, ContentState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
 		},
 	}
 }
@@ -614,9 +590,9 @@ func snapshot(t *testing.T, root string) map[string]snapshotEntry {
 
 func TestNormalizeAndValidateEventsRejectsDuplicateToolResults(t *testing.T) {
 	events := []contract.Event{
-		{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool", Action: "invoke", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},
-		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true, EvidenceState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
-		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: false, EvidenceState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool", Action: "invoke", InputState: contract.InputAbsent, Name: "fictional"}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Outcome: "success", CorrelationState: "matched", ContentState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
+		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Outcome: "failure", CorrelationState: "matched", ContentState: contract.EvidenceAbsent}, Metadata: []contract.Metadata{}},
 	}
 	if err := normalizeAndValidateEvents(events); err == nil {
 		t.Fatal("normalizeAndValidateEvents() accepted duplicate tool results")
@@ -624,7 +600,7 @@ func TestNormalizeAndValidateEventsRejectsDuplicateToolResults(t *testing.T) {
 }
 
 func TestEventTimeAndToolInputRequireConsistentStateAndOmissions(t *testing.T) {
-	events := []contract.Event{{Kind: contract.EventToolCall, TimeState: contract.TimeAbsent, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool", Action: "invoke", EvidenceState: contract.EvidenceAvailable, InputState: contract.InputUnavailable}, Metadata: []contract.Metadata{}}}
+	events := []contract.Event{{Kind: contract.EventToolCall, TimeState: contract.TimeAbsent, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool", Action: "invoke", Name: "fictional", InputState: contract.InputUnavailable}, Metadata: []contract.Metadata{}}}
 	if err := normalizeAndValidateEvents(events); err != nil {
 		t.Fatal(err)
 	}
@@ -649,44 +625,29 @@ func TestEventTimeAndToolInputRequireConsistentStateAndOmissions(t *testing.T) {
 	}
 }
 
-func TestNormalizeAndValidateEventsRejectsUnsafeExcerpt(t *testing.T) {
-	events := []contract.Event{
-		{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "shell", Action: "execute", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},
-		{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true, Excerpt: "PASS /fictional/private", EvidenceState: contract.EvidenceAvailable}, Metadata: []contract.Metadata{}},
-	}
-	if err := normalizeAndValidateEvents(events); err == nil {
-		t.Fatal("unsafe tool excerpt was accepted")
-	}
-	events[1].ToolResult.Excerpt = "PASS"
-	events[1].ToolResult.Redacted = true
+func TestNormalizeAndValidateEventsAcceptsUnrestrictedResult(t *testing.T) {
+	events := newSyntheticAdapter().events
+	result := events[2].ToolResult
+	result.Content = contract.TextContent("PASS /fictional/private token=fictional")
+	result.ContentState = contract.EvidenceAvailable
 	if err := normalizeAndValidateEvents(events); err != nil {
-		t.Fatalf("safe excerpt was rejected: %v", err)
+		t.Fatal(err)
 	}
+	result.Outcome = "unknown"
 	if err := validateToolEvidenceOmissions(events, nil); err == nil {
-		t.Fatal("redacted evidence without an omission was accepted")
+		t.Fatal("unknown outcome without omission accepted")
 	}
 }
 
-func TestNormalizeAndValidateEventsRejectsEvidenceWithoutState(t *testing.T) {
-	cases := []struct {
-		name   string
-		change func([]contract.Event)
-	}{
-		{"action", func(events []contract.Event) { events[0].ToolCall.Action = "read" }},
-		{"excerpt", func(events []contract.Event) { events[1].ToolResult.Excerpt = "PASS" }},
-		{"redacted", func(events []contract.Event) { events[1].ToolResult.Redacted = true }},
-		{"truncated", func(events []contract.Event) { events[1].ToolResult.Truncated = true }},
+func TestNormalizeAndValidateEventsRejectsInconsistentContent(t *testing.T) {
+	events := newSyntheticAdapter().events
+	events[2].ToolResult.Content = contract.TextContent("recorded output")
+	if err := normalizeAndValidateEvents(events); err == nil {
+		t.Fatal("content with absent state accepted")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			events := []contract.Event{
-				{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: "call-1", Category: "tool"}, Metadata: []contract.Metadata{}},
-				{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{CallID: "call-1", Success: true}, Metadata: []contract.Metadata{}},
-			}
-			tc.change(events)
-			if err := normalizeAndValidateEvents(events); err == nil {
-				t.Fatal("evidence without its state was accepted")
-			}
-		})
+	events[2].ToolResult.ContentState = contract.EvidenceAvailable
+	events[2].ToolResult.Content.Format = "unsupported"
+	if err := normalizeAndValidateEvents(events); err == nil {
+		t.Fatal("unsupported content format accepted")
 	}
 }

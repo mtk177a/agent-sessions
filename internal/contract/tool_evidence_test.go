@@ -1,35 +1,54 @@
 package contract
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
-func TestSafeToolExcerptSelectsOnlyWholeSafeLines(t *testing.T) {
-	excerpt, state, redacted, truncated := SafeToolExcerpt("PASS\n3 tests passed\nsecret-token: fictional\n/fictional/private\nPASS; token=fake\n", true)
-	if excerpt != "PASS\n3 tests passed" || state != EvidenceAvailable || !redacted || truncated {
-		t.Fatalf("excerpt = %q, %q, %v, %v", excerpt, state, redacted, truncated)
-	}
-	if excerpt, state, redacted, truncated = SafeToolExcerpt("", false); excerpt != "" || state != EvidenceAbsent || redacted || truncated {
-		t.Fatalf("absent excerpt = %q, %q, %v, %v", excerpt, state, redacted, truncated)
-	}
-	if excerpt, state, redacted, truncated = SafeToolExcerpt("private output", true); excerpt != "" || state != EvidenceUnavailable || !redacted || truncated {
-		t.Fatalf("unsafe excerpt = %q, %q, %v, %v", excerpt, state, redacted, truncated)
-	}
-	input := strings.Repeat("3 tests passed\n", 60)
-	excerpt, state, redacted, truncated = SafeToolExcerpt(input, true)
-	if len(excerpt) > MaxToolExcerptBytes || state != EvidenceAvailable || redacted || !truncated {
-		t.Fatalf("bounded excerpt = %d, %q, %v, %v", len(excerpt), state, redacted, truncated)
+func TestRecordedContentDistinguishesAbsentEmptyAndUnsupported(t *testing.T) {
+	for _, tc := range []struct {
+		raw          string
+		state        EvidenceState
+		text, format string
+	}{
+		{"", EvidenceAbsent, "", ""}, {`""`, EvidenceAvailable, "", "text"}, {`{}`, EvidenceAvailable, `{}`, "json"}, {`[]`, EvidenceAvailable, `[]`, "json"}, {`null`, EvidenceUnsupported, "", ""},
+		{`"PASS /fictional/private token=fictional"`, EvidenceAvailable, "PASS /fictional/private token=fictional", "text"},
+	} {
+		content, state := RecordedContent(json.RawMessage(tc.raw))
+		if state != tc.state {
+			t.Fatalf("%s: state %s", tc.raw, state)
+		}
+		if state == EvidenceAvailable && (content.Text != tc.text || content.Format != tc.format || !ValidContent(content, true)) {
+			t.Fatalf("%s: %#v", tc.raw, content)
+		}
 	}
 }
-
-func TestSafeToolExcerptRejectsAdversarialLines(t *testing.T) {
-	for _, body := range []string{
-		"PASS token=fake", "PASS /fictional/private", "PASS host.example.invalid", "$ PASS", "PASS\x1b[0m", "4 tests passed; secret=fake", "9 tests passed by Alice", "9223372036854775807 tests passed",
-	} {
-		excerpt, state, redacted, _ := SafeToolExcerpt(body, true)
-		if excerpt != "" || state != EvidenceUnavailable || !redacted {
-			t.Fatalf("unsafe body %q produced %q, %q, %v", body, excerpt, state, redacted)
+func TestContentBoundsPreserveUTF8AndReportIncompleteJSON(t *testing.T) {
+	original := strings.Repeat("日", MaxStringBytes)
+	content := TextContent(original)
+	if !content.Truncated || len(content.Text) > MaxStringBytes || !utf8.ValidString(content.Text) || !strings.HasPrefix(original, content.Text) {
+		t.Fatal("invalid text prefix")
+	}
+	content = JSONContent([]string{original, "second argument"})
+	if !content.Truncated || !utf8.ValidString(content.Text) || json.Valid([]byte(content.Text)) || !ValidContent(content, true) {
+		t.Fatal("truncated JSON not reported")
+	}
+}
+func TestCorrelationsRetainAmbiguousUnmatchedAndOutOfOrderResults(t *testing.T) {
+	call := func(id string) Event { return Event{ToolCall: &ToolCallEvent{CallID: id}} }
+	result := func(id string) Event {
+		return Event{ToolResult: &ToolResultEvent{CallID: id, Outcome: "unknown", ContentState: EvidenceAvailable, Content: TextContent("body")}}
+	}
+	events := []Event{result("later"), call("later"), call("duplicate"), call("duplicate"), result("duplicate"), result("missing"), result(""), call("twice"), result("twice"), result("twice")}
+	omissions := ResolveToolCorrelations(events)
+	if len(omissions) == 0 || events[0].ToolResult.CorrelationState != "matched" || events[4].ToolResult.CorrelationState != "ambiguous" || events[5].ToolResult.CorrelationState != "unmatched" || events[8].ToolResult.CorrelationState != "ambiguous" {
+		t.Fatal("incorrect correlation")
+	}
+	for _, e := range events {
+		if e.ToolResult != nil && (e.ToolResult.Content.Text != "body" || e.ToolResult.CorrelationState != "matched" && e.ToolResult.CallID != "") {
+			t.Fatal("result was lost or falsely correlated")
 		}
 	}
 }

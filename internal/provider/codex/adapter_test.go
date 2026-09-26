@@ -36,7 +36,7 @@ func TestAdapterDiscoversAndNormalizesCodexRollout(t *testing.T) {
 	}
 
 	events := adapter.Events(context.Background(), source, got.Identity.ProviderSourceFingerprint)
-	if events.Status != contract.StatusPartial || len(events.Events) != 4 || !hasOmission(events.Omissions, "unsupported_tool_result") {
+	if events.Status != contract.StatusPartial || len(events.Events) != 5 || !hasOmission(events.Omissions, "tool_outcome_unknown") {
 		t.Fatalf("Events() = %#v", events)
 	}
 	if events.Events[0].Message == nil || events.Events[0].Message.Role != "user" || events.Events[1].Message == nil || events.Events[1].Message.Role != "assistant" {
@@ -46,8 +46,8 @@ func TestAdapterDiscoversAndNormalizesCodexRollout(t *testing.T) {
 	if call == nil || call.CallID == "provider-call-1" || call.Category != "shell" {
 		t.Fatalf("tool call = %#v", events.Events[2])
 	}
-	if events.Events[3].Error == nil || events.Events[3].Error.Category != "provider" {
-		t.Fatalf("error = %#v", events.Events[3])
+	if events.Events[4].Error == nil || events.Events[4].Error.Category != "provider" {
+		t.Fatalf("error = %#v", events.Events[4])
 	}
 	evidence := adapter.Evidence(context.Background(), source, got.Identity.ProviderSourceFingerprint)
 	if evidence.Status != contract.StatusComplete || len(evidence.Chunks) != 1 || evidence.Chunks[0].Name != "rollout/primary.jsonl" {

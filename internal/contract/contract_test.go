@@ -92,89 +92,6 @@ func TestVerifiedVersionReadersMatchesChunkEncoding(t *testing.T) {
 	}
 }
 
-func TestFinalizeRedactsEveryDynamicStringPosition(t *testing.T) {
-	unsafe := "token=sk-fictional-secret /fictional host.example.invalid 192.0.2.10"
-	nativeID := "00000000-0000-4000-8000-000000000002"
-	ref := NewSourceRef("codex", "codex-default", nativeID)
-	sources := []Source{{
-		Identity: SourceIdentity{Provider: "codex", SourceInstance: "codex-default", ProviderNativeSourceID: nativeID, ProviderSourceFingerprint: SourceFingerprint(nativeID), SourceRef: ref},
-		Kind:     "session", VersionHint: &VersionHint{Kind: "provider_metadata", Value: unsafe},
-		Relationships: []Relationship{}, Metadata: []Metadata{{Name: "note", Value: unsafe}},
-	}}
-	events := []Event{
-		{Index: 0, Kind: EventMessage, Message: &MessageEvent{Role: "user", Text: unsafe}, Metadata: []Metadata{{Name: "note", Value: unsafe}}},
-		{Index: 1, Kind: EventError, Error: &ErrorEvent{Category: "provider", Message: unsafe}, Metadata: []Metadata{}},
-	}
-	envelope := Envelope{
-		SchemaVersion:          SchemaVersion,
-		CLIVersion:             unsafe,
-		RedactionPolicyVersion: RedactionPolicyVersion,
-		Operation:              "events",
-		Status:                 StatusComplete,
-		Data:                   &Data{Sources: &sources, Events: &events},
-		Omissions:              []Omission{{Code: "unknown_shape", Scope: "source", Message: unsafe}},
-	}
-	Finalize(&envelope)
-	encoded := string(mustJSON(t, envelope))
-	for _, forbidden := range []string{"sk-fictional-secret", "/fictional", "host.example.invalid", "192.0.2.10"} {
-		if strings.Contains(encoded, forbidden) {
-			t.Fatalf("output contains %q: %s", forbidden, encoded)
-		}
-	}
-	if envelope.Status != StatusPartial || len(envelope.Omissions) == 0 {
-		t.Fatalf("redaction did not reduce completeness: %#v", envelope)
-	}
-
-	errorEnvelope := NewEnvelope("list", "test", StatusError)
-	errorEnvelope.Error = &PublicError{Code: "provider_failure", Category: "provider", Message: unsafe, Details: []ErrorDetail{{Name: "diagnostic", Value: unsafe}, {Name: "raw_path", Value: "single-label-host"}}}
-	Finalize(&errorEnvelope)
-	if len(errorEnvelope.Omissions) == 0 || errorEnvelope.Omissions[len(errorEnvelope.Omissions)-1].Code != "output_redacted" {
-		t.Fatalf("error redaction omission = %#v", errorEnvelope.Omissions)
-	}
-	if err := errorEnvelope.Validate(); err != nil {
-		t.Fatalf("redacted error envelope is invalid: %v", err)
-	}
-	errorJSON := string(mustJSON(t, errorEnvelope))
-	for _, forbidden := range []string{"sk-fictional-secret", "/fictional", "host.example.invalid", "192.0.2.10", "single-label-host"} {
-		if strings.Contains(errorJSON, forbidden) {
-			t.Fatalf("structured error contains %q: %s", forbidden, errorJSON)
-		}
-	}
-}
-
-func TestFinalizeRedactsAdversarialCredentialForms(t *testing.T) {
-	for _, value := range []string{
-		"ghp_fictionalcredentialvalue",
-		"github_pat_fictional_credential_value",
-		"Authorization: Basic ZmljdGlvbmFsOnNlY3JldA==",
-		`token: "opaque-fictional-value"`,
-	} {
-		t.Run(value, func(t *testing.T) {
-			envelope := NewEnvelope("list", value, StatusComplete)
-			ref := NewSourceRef("synthetic", "synthetic-default", value)
-			source := Source{
-				Identity: SourceIdentity{Provider: "synthetic", SourceInstance: "synthetic-default", ProviderNativeSourceID: value, ProviderSourceFingerprint: SourceFingerprint(value), SourceRef: ref},
-				Kind:     "session", VersionHint: &VersionHint{Kind: "provider_metadata", Value: value}, Relationships: []Relationship{}, Metadata: []Metadata{{Name: "note", Value: value}},
-			}
-			events := []Event{
-				{Index: 0, Kind: EventMessage, Message: &MessageEvent{Role: "user", Text: value}, Metadata: []Metadata{{Name: "note", Value: value}}},
-				{Index: 1, Kind: EventError, Error: &ErrorEvent{Category: "provider", Message: value}, Metadata: []Metadata{}},
-			}
-			envelope.Data = &Data{Source: &source, Events: &events}
-			envelope.Omissions = []Omission{{Code: "unknown_shape", Scope: "source", Message: value}}
-			envelope.Error = &PublicError{Code: "provider_failure", Category: "provider", Message: value, Details: []ErrorDetail{{Name: "diagnostic", Value: value}}}
-			Finalize(&envelope)
-			encoded := string(mustJSON(t, envelope))
-			if strings.Contains(encoded, value) || strings.Contains(encoded, "ZmljdGlvbmFsOnNlY3JldA==") || strings.Contains(encoded, "opaque-fictional-value") {
-				t.Fatalf("credential payload remained in output: %s", encoded)
-			}
-			if envelope.Status != StatusPartial || len(envelope.Omissions) == 0 {
-				t.Fatalf("credential redaction did not reduce completeness: %#v", envelope)
-			}
-		})
-	}
-}
-
 func TestBoundsRejectEveryOversizedStructuralString(t *testing.T) {
 	oversized := strings.Repeat("x", MaxStringBytes+1)
 	for _, tc := range []struct {
@@ -182,7 +99,6 @@ func TestBoundsRejectEveryOversizedStructuralString(t *testing.T) {
 		set  func(*Envelope)
 	}{
 		{"schema_version", func(e *Envelope) { e.SchemaVersion = oversized }},
-		{"redaction_policy_version", func(e *Envelope) { e.RedactionPolicyVersion = oversized }},
 		{"operation", func(e *Envelope) { e.Operation = oversized }},
 		{"status", func(e *Envelope) { e.Status = Status(oversized) }},
 		{"data_source_ref", func(e *Envelope) { e.Data.SourceRef = oversized }},
@@ -241,7 +157,7 @@ func TestBoundsAndCompletenessInvariants(t *testing.T) {
 }
 
 func TestEnvelopeRejectsUnsupportedSchemaVersions(t *testing.T) {
-	for _, version := range []string{"v0alpha1", "v2"} {
+	for _, version := range []string{"v0alpha1", "v1", "v3"} {
 		t.Run(version, func(t *testing.T) {
 			envelope := NewEnvelope("list", "test", StatusComplete)
 			envelope.SchemaVersion = version
@@ -306,16 +222,6 @@ func TestBoundsCoverEveryPublicFreeFormString(t *testing.T) {
 	}
 }
 
-func TestSensitiveMetadataFieldCannotRemainComplete(t *testing.T) {
-	sources := []Source{{Metadata: []Metadata{{Name: "raw_path", Value: "relative-looking-value"}}, Relationships: []Relationship{}}}
-	envelope := NewEnvelope("list", "test", StatusComplete)
-	envelope.Data = &Data{Sources: &sources}
-	Finalize(&envelope)
-	if envelope.Status != StatusPartial || sources[0].Metadata[0].Value != "<redacted:unsafe-field>" {
-		t.Fatalf("sensitive metadata was not safely omitted: %#v", envelope)
-	}
-}
-
 func eventPointer(events []Event) *[]Event { return &events }
 
 func fullyPopulatedEnvelope() Envelope {
@@ -328,8 +234,8 @@ func fullyPopulatedEnvelope() Envelope {
 	exitCode := 0
 	events := []Event{
 		{Index: 0, Kind: EventMessage, Message: &MessageEvent{Role: "user", Text: "message"}, Metadata: []Metadata{{Name: "note", Value: "value"}}},
-		{Index: 1, Kind: EventToolCall, ToolCall: &ToolCallEvent{CallID: "call-1", Category: "filesystem", Action: "read", EvidenceState: EvidenceAvailable}, Metadata: []Metadata{}},
-		{Index: 2, Kind: EventToolResult, ToolResult: &ToolResultEvent{CallID: "call-1", Success: true, ExitCode: &exitCode, EvidenceState: EvidenceAbsent}, Metadata: []Metadata{}},
+		{Index: 1, Kind: EventToolCall, ToolCall: &ToolCallEvent{CallID: "call-1", Category: "filesystem", Action: "read", InputState: InputAbsent}, Metadata: []Metadata{}},
+		{Index: 2, Kind: EventToolResult, ToolResult: &ToolResultEvent{CallID: "call-1", Outcome: "success", CorrelationState: "matched", ExitCode: &exitCode, ContentState: EvidenceAbsent}, Metadata: []Metadata{}},
 		{Index: 3, Kind: EventError, Error: &ErrorEvent{Category: "provider", Message: "error"}, Metadata: []Metadata{}},
 	}
 	envelope := NewEnvelope("events", "test", StatusError)

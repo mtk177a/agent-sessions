@@ -78,6 +78,7 @@ type completedItem struct {
 	Type             string                        `json:"type"`
 	ID               string                        `json:"id"`
 	Content          []struct{ Type, Text string } `json:"content"`
+	Success          *bool                         `json:"success"`
 	Status           string                        `json:"status"`
 	ExitCode         *int                          `json:"exit_code"`
 	Stdout           *string                       `json:"stdout"`
@@ -448,99 +449,121 @@ func canonicalThreadID(value string) (string, bool) {
 	return strings.ToLower(value), true
 }
 
-func codexToolResult(item completedItem, callID string, success bool) contract.ToolResultEvent {
-	result := contract.ToolResultEvent{CallID: callID, Success: success, ExitCode: item.ExitCode}
-	var body string
-	present, omitted, unsupported := false, false, false
+func codexToolResult(item completedItem, callID string) contract.ToolResultEvent {
+	result := contract.ToolResultEvent{CallID: callID, Outcome: "unknown", ExitCode: item.ExitCode, ContentState: contract.EvidenceAbsent}
+	if item.Type == "CommandExecution" && item.ExitCode != nil {
+		if *item.ExitCode == 0 {
+			result.Outcome = "success"
+		} else {
+			result.Outcome = "failure"
+		}
+	} else {
+		switch item.Status {
+		case "completed":
+			result.Outcome = "success"
+		case "failed", "declined":
+			result.Outcome = "failure"
+		}
+	}
+	if item.Type == "DynamicToolCall" && item.Success != nil {
+		if *item.Success {
+			result.Outcome = "success"
+		} else {
+			result.Outcome = "failure"
+		}
+	}
 	switch item.Type {
 	case "CommandExecution":
-		if item.AggregatedOutput != nil && *item.AggregatedOutput != "" {
-			body, present = *item.AggregatedOutput, true
-		} else {
-			if item.Stdout != nil {
-				body, present = *item.Stdout, true
+		fields := map[string]string{}
+		for _, field := range []struct {
+			name  string
+			value *string
+		}{
+			{"aggregated_output", item.AggregatedOutput}, {"stdout", item.Stdout}, {"stderr", item.Stderr}, {"formatted_output", item.FormattedOutput},
+		} {
+			if field.value != nil {
+				fields[field.name] = *field.value
 			}
-			if item.Stderr != nil {
-				if body != "" && *item.Stderr != "" {
-					body += "\n"
-				}
-				body += *item.Stderr
-				present = true
+		}
+		if len(fields) == 1 {
+			for _, body := range fields {
+				result.Content = contract.TextContent(body)
 			}
-			if body == "" && item.FormattedOutput != nil {
-				body, present = *item.FormattedOutput, true
-			}
+		} else if len(fields) > 1 {
+			result.Content = contract.JSONContent(fields)
 		}
 	case "McpToolCall":
 		if hasJSONValue(item.Result) {
-			var payload struct {
-				Content           json.RawMessage `json:"content"`
-				StructuredContent json.RawMessage `json:"structuredContent"`
-			}
-			if json.Unmarshal(item.Result, &payload) != nil {
-				unsupported = true
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(item.Result, &fields) != nil || fields == nil {
+				result.ContentState = contract.EvidenceUnsupported
 			} else {
-				body, present, omitted, unsupported = codexTextBlocks(payload.Content, "text")
-				omitted = omitted || hasJSONValue(payload.StructuredContent)
-			}
-		}
-		if hasJSONValue(item.Error) {
-			var payload struct {
-				Message string `json:"message"`
-			}
-			if json.Unmarshal(item.Error, &payload) != nil {
-				unsupported = true
-			} else {
-				if body != "" && payload.Message != "" {
-					body += "\n"
+				if hasJSONValue(fields["isError"]) {
+					var isError bool
+					if json.Unmarshal(fields["isError"], &isError) != nil {
+						result.Outcome = "unknown"
+					} else if isError {
+						result.Outcome = "failure"
+					}
 				}
-				body += payload.Message
-				present = true
+				text, state := recordedTextBlocks(fields["content"], "text")
+				result.Content, result.ContentState = text, state
+				if len(fields["structuredContent"]) != 0 {
+					value := map[string]json.RawMessage{"structuredContent": fields["structuredContent"]}
+					if text != nil {
+						encoded, _ := json.Marshal(text.Text)
+						if text.Format == "json" && !text.Truncated {
+							encoded = []byte(text.Text)
+						}
+						value["content"] = encoded
+					}
+					result.Content = contract.JSONContent(value)
+					if text != nil {
+						result.Content.Omitted = text.Omitted
+						result.Content.Truncated = result.Content.Truncated || text.Truncated
+					}
+					if state == contract.EvidenceUnsupported || state == contract.EvidenceUnavailable {
+						result.Content.Omitted = true
+					}
+				}
 			}
 		}
 	case "DynamicToolCall":
-		if hasJSONValue(item.ContentItems) {
-			body, present, omitted, unsupported = codexTextBlocks(item.ContentItems, "inputText")
-		}
-		if hasJSONValue(item.Error) {
-			var errorText string
-			if json.Unmarshal(item.Error, &errorText) != nil {
-				unsupported = true
-			} else {
-				if body != "" && errorText != "" {
-					body += "\n"
-				}
-				body += errorText
-				present = true
+		result.Content, result.ContentState = recordedTextBlocks(item.ContentItems, "inputText")
+	}
+	if hasJSONValue(item.Error) {
+		errorBody, state := contract.RecordedContent(item.Error)
+		if errorBody != nil {
+			if result.ContentState == contract.EvidenceUnsupported || result.ContentState == contract.EvidenceUnavailable {
+				errorBody.Omitted = true
 			}
-		}
-	}
-	result.Excerpt, result.EvidenceState, result.Redacted, result.Truncated = contract.SafeToolExcerpt(body, present)
-	result.Redacted = result.Redacted || omitted
-	if omitted && result.EvidenceState == contract.EvidenceAbsent {
-		result.EvidenceState = contract.EvidenceUnavailable
-	}
-	if unsupported {
-		if result.EvidenceState != contract.EvidenceAvailable {
-			result.EvidenceState = contract.EvidenceUnsupported
+			if result.Content == nil {
+				result.Content = errorBody
+			} else {
+				previous := result.Content
+				result.Content = contract.JSONContent(map[string]any{"output": contentValue(previous), "error": contentValue(errorBody)})
+				result.Content.Omitted = previous.Omitted || errorBody.Omitted
+				result.Content.Truncated = result.Content.Truncated || previous.Truncated || errorBody.Truncated
+			}
+		} else if result.Content != nil {
+			result.Content.Omitted = true
 		} else {
-			result.Redacted = true
+			result.ContentState = state
 		}
+	}
+	if result.Content != nil {
+		result.ContentState = contract.EvidenceAvailable
 	}
 	return result
 }
 
-func hasJSONValue(raw json.RawMessage) bool {
-	return len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
-}
-
-func codexTextBlocks(raw json.RawMessage, textType string) (string, bool, bool, bool) {
+func recordedTextBlocks(raw json.RawMessage, textType string) (*contract.Content, contract.EvidenceState) {
 	if !hasJSONValue(raw) {
-		return "", false, false, false
+		return nil, contract.EvidenceAbsent
 	}
 	var blocks []json.RawMessage
-	if json.Unmarshal(raw, &blocks) != nil {
-		return "", false, false, true
+	if json.Unmarshal(raw, &blocks) != nil || blocks == nil {
+		return nil, contract.EvidenceUnsupported
 	}
 	texts := []string{}
 	omitted := false
@@ -549,21 +572,27 @@ func codexTextBlocks(raw json.RawMessage, textType string) (string, bool, bool, 
 			Type string  `json:"type"`
 			Text *string `json:"text"`
 		}
-		if json.Unmarshal(rawBlock, &block) != nil || block.Type == "" {
-			omitted = true
-			continue
-		}
-		if block.Type != textType {
-			omitted = true
-			continue
-		}
-		if block.Text == nil {
+		if json.Unmarshal(rawBlock, &block) != nil || block.Type != textType || block.Text == nil {
 			omitted = true
 			continue
 		}
 		texts = append(texts, *block.Text)
 	}
-	return strings.Join(texts, "\n"), len(texts) > 0, omitted, false
+	if len(texts) == 0 && omitted {
+		return nil, contract.EvidenceUnavailable
+	}
+	var content *contract.Content
+	if len(texts) == 1 {
+		content = contract.TextContent(texts[0])
+	} else {
+		content = contract.JSONContent(texts)
+	}
+	content.Omitted = omitted
+	return content, contract.EvidenceAvailable
+}
+
+func hasJSONValue(raw json.RawMessage) bool {
+	return len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
 func messageEvent(role, text string) contract.Event {
@@ -622,3 +651,10 @@ func omission(code, scope, message string) contract.Omission {
 }
 
 var _ provider.Adapter = (*Adapter)(nil)
+
+func contentValue(content *contract.Content) any {
+	if content.Format == "json" && !content.Truncated {
+		return json.RawMessage(content.Text)
+	}
+	return content.Text
+}

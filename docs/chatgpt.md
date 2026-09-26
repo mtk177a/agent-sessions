@@ -1,6 +1,6 @@
 # ChatGPT Data Export provider
 
-The `chatgpt` provider adapter reads a user-requested ChatGPT Data Export ZIP and maps conversations into the provider-neutral stable `v1` CLI contract.
+The `chatgpt` provider adapter reads a user-requested ChatGPT Data Export ZIP and maps conversations into the provider-neutral stable `v2` CLI contract.
 
 `list` and `show` expose `last_interaction_at` when the selected conversation branch establishes the latest interaction time.\
 If they cannot establish it, they omit the field and return `partial` with `source_time_unavailable`.\
@@ -59,12 +59,14 @@ Assistant `thoughts` and `reasoning_recap`, other branches, conversation `update
 An invalid branch, an unknown potentially interactive record, a missing or invalid interaction time, or no interaction leaves the field absent; `list` aggregates the number of affected conversations in one omission.
 
 Nodes outside the active chain are omitted with `non_active_branch`.\
-Tool-role results are omitted with `correlation_omitted` because the accepted export shape does not provide a stable provider-neutral call/result relationship at this boundary.\
+Tool-role results retain supported text content as standalone results with `correlation_state: unmatched`, `outcome: unknown`, and corresponding omissions.\
+The accepted shape provides no stable call/result relationship; neither graph parents nor adjacent records imply correlation.\
 Unknown active nodes or content are reported with `unknown_node`; useful remaining events return `partial`, while an observation with no safely usable event returns `unsupported`.\
 A missing active node, a parent cycle, or an unusable graph returns `unsupported_format` rather than inventing an order or silently shortening the branch.
 
-All normalized output passes through the common final redaction policy immediately before JSON encoding.\
-Redaction retains `redaction_policy_version`, adds `output_redacted`, and prevents a result from remaining `complete`.
+Messages and tool results follow the common bounds without automatic content redaction.\
+Readable string portions are retained, and excluded non-text or unsupported portions are reported.\
+Content can contain secrets; consumers own retention and external sharing.
 
 ## Archive safety and bounds
 

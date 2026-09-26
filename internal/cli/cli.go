@@ -372,7 +372,7 @@ func (r Runner) write(output io.Writer, envelope contract.Envelope, exit int) in
 		exit = ExitFailure
 	}
 	encoded, err := json.Marshal(envelope)
-	if err != nil || len(encoded) > MaxResponseBytes {
+	if err != nil || len(encoded)+1 > MaxResponseBytes {
 		envelope = r.fallbackEnvelope(envelope.Operation, "response_limit_exceeded", "resource", "The response could not be encoded within the output limit.")
 		encoded, _ = json.Marshal(envelope)
 		exit = ExitFailure
@@ -388,7 +388,6 @@ func prepareEnvelope(envelope *contract.Envelope) error {
 	if err := contract.EnforceBounds(envelope); err != nil {
 		return err
 	}
-	contract.Finalize(envelope)
 	return envelope.Validate()
 }
 
@@ -547,6 +546,12 @@ func validateSources(sources []contract.Source, providerName, instance string) e
 }
 
 func normalizeAndValidateEvents(events []contract.Event) error {
+	allCalls := map[string]struct{}{}
+	for _, event := range events {
+		if event.ToolCall != nil && event.ToolCall.CallID != "" {
+			allCalls[event.ToolCall.CallID] = struct{}{}
+		}
+	}
 	calls := map[string]struct{}{}
 	results := map[string]struct{}{}
 	for i := range events {
@@ -582,24 +587,40 @@ func normalizeAndValidateEvents(events []contract.Event) error {
 				return errors.New("invalid message event")
 			}
 		case contract.EventToolCall:
-			if event.ToolCall == nil || !contract.ValidIdentifier(event.ToolCall.CallID) || !contract.ValidToken(event.ToolCall.Category) || event.ToolCall.EvidenceState != "" && !contract.ValidEvidenceState(event.ToolCall.EvidenceState) || event.ToolCall.InputState != "" && !contract.ValidInputState(event.ToolCall.InputState) || (event.ToolCall.EvidenceState == contract.EvidenceAvailable) != (event.ToolCall.Action != "") || event.ToolCall.Action != "" && !contract.ValidToolAction(event.ToolCall.Action) {
+			call := event.ToolCall
+			if call == nil || !contract.ValidToken(call.Category) || call.Action != "" && !contract.ValidToolAction(call.Action) || !contract.ValidInputState(call.InputState) || !contract.ValidContent(call.Input, call.InputState == contract.InputAvailable) {
 				return errors.New("invalid tool call event")
 			}
-			if _, exists := calls[event.ToolCall.CallID]; exists {
-				return errors.New("duplicate tool call ID")
+			if call.CallID != "" {
+				if !contract.ValidIdentifier(call.CallID) {
+					return errors.New("invalid tool call ID")
+				}
+				if _, exists := calls[call.CallID]; exists {
+					return errors.New("duplicate tool call ID")
+				}
+				calls[call.CallID] = struct{}{}
 			}
-			calls[event.ToolCall.CallID] = struct{}{}
 		case contract.EventToolResult:
-			if event.ToolResult == nil || event.ToolResult.EvidenceState != "" && !contract.ValidEvidenceState(event.ToolResult.EvidenceState) || (event.ToolResult.EvidenceState == contract.EvidenceAvailable) != (event.ToolResult.Excerpt != "") || (event.ToolResult.EvidenceState == "" || event.ToolResult.EvidenceState == contract.EvidenceAbsent) && (event.ToolResult.Redacted || event.ToolResult.Truncated) || event.ToolResult.Truncated && event.ToolResult.EvidenceState != contract.EvidenceAvailable || event.ToolResult.Excerpt != "" && !contract.ValidSafeToolExcerpt(event.ToolResult.Excerpt) {
+			result := event.ToolResult
+			if result == nil || !contract.ValidEvidenceState(result.ContentState) || !contract.ValidContent(result.Content, result.ContentState == contract.EvidenceAvailable) || !contract.ValidOutcome(result.Outcome) {
 				return errors.New("invalid tool result event")
 			}
-			if _, exists := calls[event.ToolResult.CallID]; !exists {
-				return errors.New("tool result does not reference an earlier call")
+			switch result.CorrelationState {
+			case "matched":
+				if _, exists := allCalls[result.CallID]; !exists || result.CallID == "" {
+					return errors.New("tool result lacks a unique call")
+				}
+				if _, exists := results[result.CallID]; exists {
+					return errors.New("duplicate tool result")
+				}
+				results[result.CallID] = struct{}{}
+			case "unmatched", "ambiguous":
+				if result.CallID != "" {
+					return errors.New("unresolved result has a call ID")
+				}
+			default:
+				return errors.New("invalid correlation state")
 			}
-			if _, exists := results[event.ToolResult.CallID]; exists {
-				return errors.New("duplicate tool result")
-			}
-			results[event.ToolResult.CallID] = struct{}{}
 		case contract.EventError:
 			if event.Error == nil || !contract.ValidToken(event.Error.Category) {
 				return errors.New("invalid error event")

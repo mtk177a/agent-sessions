@@ -234,7 +234,7 @@ func TestProductionRegistryPaginatesMixedProviderInteractionTimes(t *testing.T) 
 	}
 }
 
-func TestChatGPTEventsApplyFinalRedactionAndRetainPolicyVersion(t *testing.T) {
+func TestChatGPTEventsRetainRecordedContentInV2(t *testing.T) {
 	root := t.TempDir()
 	exportPath := filepath.Join(root, "chatgpt-export.zip")
 	content := `[{"id":"fictional-conversation","conversation_id":"fictional-conversation","current_node":"user","mapping":{"user":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["token=sk-fictional-secret"]}}}}}]`
@@ -249,14 +249,14 @@ func TestChatGPTEventsApplyFinalRedactionAndRetainPolicyVersion(t *testing.T) {
 	if exit := newRunner().Run(context.Background(), []string{"events", "--config", configPath, ref}, &output); exit != cli.ExitOK {
 		t.Fatalf("exit = %d, output = %s", exit, output.String())
 	}
-	if bytes.Contains(output.Bytes(), []byte("sk-fictional-secret")) {
-		t.Fatalf("redaction leaked source content: %s", output.String())
+	if !bytes.Contains(output.Bytes(), []byte("sk-fictional-secret")) {
+		t.Fatalf("recorded source content was removed: %s", output.String())
 	}
 	var envelope contract.Envelope
 	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Status != contract.StatusPartial || envelope.RedactionPolicyVersion != "v1" || !hasOmissionCode(envelope.Omissions, "output_redacted") {
+	if envelope.Status != contract.StatusPartial || hasOmissionCode(envelope.Omissions, "output_redacted") || bytes.Contains(output.Bytes(), []byte("redaction_policy_version")) {
 		t.Fatalf("redaction contract = %#v", envelope)
 	}
 }
@@ -360,7 +360,7 @@ func runProductionCLI(t *testing.T, runner cli.Runner, args ...string) contract.
 		t.Fatal(err)
 	}
 	wantPartialTime := (envelope.Operation == "list" || envelope.Operation == "show") && hasOmissionCode(envelope.Omissions, "source_time_unavailable")
-	if envelope.SchemaVersion != "v1" || envelope.RedactionPolicyVersion != "v1" || (envelope.Status != contract.StatusComplete && !(wantPartialTime && envelope.Status == contract.StatusPartial)) || envelope.Omissions == nil {
+	if envelope.SchemaVersion != "v2" || (envelope.Status != contract.StatusComplete && !(wantPartialTime && envelope.Status == contract.StatusPartial)) || envelope.Omissions == nil {
 		t.Fatalf("unstable envelope for %v: %#v", args, envelope)
 	}
 	return envelope
@@ -380,7 +380,7 @@ func assertCommonEvents(t *testing.T, events []contract.Event) {
 				callID = event.ToolCall.CallID
 			}
 		case contract.EventToolResult:
-			if event.ToolResult != nil && event.ToolResult.Success {
+			if event.ToolResult != nil && event.ToolResult.Outcome == "success" {
 				resultID = event.ToolResult.CallID
 			}
 		case contract.EventError:

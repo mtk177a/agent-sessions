@@ -2,7 +2,7 @@
 
 The `codex` provider adapter reads Codex rollout artifacts directly from a Codex home without starting the Codex App Server.
 
-It maps the compatibility boundary below into the provider-neutral stable `v1` CLI contract.\
+It maps the compatibility boundary below into the provider-neutral stable `v2` CLI contract.\
 The rollout JSONL format remains adapter-internal and is not part of that public schema.
 
 ## Discovery boundary
@@ -53,24 +53,36 @@ This structural compatibility applies only to `list` and `show`; `events` and `v
 
 The adapter recognizes the `session_meta`, `event_msg`, and `response_item` rollout envelopes needed for the public observations.\
 For legacy history, `user_message` and `agent_message` events are the canonical message rows, while response tool calls and their persisted output rows provide correlation evidence.\
-Legacy output rows do not persist the internal success value, so the adapter omits the normalized result instead of guessing its outcome.\
+Legacy output rows do not persist the internal success value, so the adapter retains their bodies with `outcome: unknown`.\
 For native paginated history, completed `UserMessage`, `AgentMessage`, `CommandExecution`, `McpToolCall`, and `DynamicToolCall` items are canonical; lower-level response rows are not emitted again.\
 For canonicalized legacy paginated history, completed message items are canonical while legacy response rows provide tool call and result correlation; completed tool items are not emitted again.
 
-Tool call identifiers are deterministic adapter-owned hashes of the thread identity and provider correlation identifier.\
-Public categories are limited to `shell`, `file_change`, `mcp`, and `tool`; raw commands, arguments, tool payloads, and arbitrary provider tool names are not normalized into public structural fields.
+Tool call identifiers are deterministic adapter-owned hashes of the thread identity and explicit provider correlation identifier.\
+Correlation is resolved over the selected logical history; unmatched or duplicate-identifier results retain their bodies.
 
-Emitted events use the timestamp of their canonical rollout row.\
-A completed tool item gives its call and result the same `recorded_at`; it does not establish separate call and result times.\
-Input presence comes from the item-specific `command`, `arguments`, or `input` field (or the legacy local shell action's `command` field).\
-Older accepted rows missing an expected input field report `input_state: unavailable` rather than claiming the input was absent.
+Public categories remain `shell`, `file_change`, `mcp`, and `tool`.\
+Legacy calls expose the recorded `name` and `arguments` or `input`; local shell calls expose their recorded `action` object, retaining command arrays and other input fields.\
+Completed items expose `command` with recorded `cwd` and `interaction_input` when present, or MCP/dynamic `arguments`.\
+Tool names use recorded `tool`; command items use their recorded variant name `CommandExecution`, and legacy local shell calls use `local_shell_call`.\
+Recorded MCP `server` and dynamic `namespace` values remain provider-specific metadata when present.\
+Older accepted rows missing an expected input field report `input_state: unavailable`, not inferred absence.
 
-Completed command items emit `execute`; completed MCP and dynamic tool items emit `invoke`.\
-Known legacy shell and patch calls emit `execute` and `edit`, while other correlated calls emit `invoke`.\
-For completed command items, the excerpt reader prefers non-empty `aggregated_output`, then `stdout` and `stderr`, then `formatted_output`.\
-For completed MCP and dynamic tool items, it reads text content blocks and excludes structured or non-text content.\
-Only lines permitted by the common safe excerpt policy appear in the public result; omitted content and unsupported body shapes reduce completeness.\
-Legacy persisted output still cannot produce a normalized result because it lacks a safe success value.
+Events use their canonical rollout row's timestamp.\
+A completed item gives its call and result the same time, not independently established start and end times.\
+Commands emit `execute`, MCP and dynamic tools emit `invoke`, and known legacy patch calls emit `edit`.
+
+Command results retain recorded `aggregated_output`, `stdout`, `stderr`, and `formatted_output`.\
+One recorded field is returned as text; multiple fields are returned as distinct JSON fields.\
+Recorded empty bodies remain distinct from absent bodies.\
+MCP text and `structuredContent` are both retained; dynamic `inputText` and legacy `input_text` results are also returned.\
+Verified native paginated `FunctionCallOutput` items also retain their bodies.\
+Their item IDs do not establish call correlation, so they remain standalone results with unknown outcome and recorded name in `tool_name` metadata.\
+Multiple text blocks use an ordered JSON array; non-text and unsupported portions are reported as omissions.\
+Known error fields are retained and, when output also exists, represented as JSON with `output` and `error`.
+
+Outcomes use command `exit_code`, explicit dynamic `success`, MCP `isError`, and verified `status` semantics.\
+If these do not establish an outcome, it is `unknown`; text such as `PASS` never establishes success.\
+Each entire input or result follows the common 64 KiB bound; truncation and omissions reduce completeness.
 
 Errors are normalized from explicit provider error events.\
 Parent and fork relationships are emitted only from explicit `parent_thread_id` and `forked_from_id` metadata.

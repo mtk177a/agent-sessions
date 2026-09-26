@@ -13,7 +13,7 @@
 時刻を確定できない場合は省略として報告します。\
 利用側は `list` の全ページから一定期間内のソースを選び、時刻の降順、次に `source_ref` の昇順で並べられます。
 
-> 状況: プロバイダー共通の CLI 基盤と、読み取り専用の Codex、Claude Code、ChatGPT Data Export アダプターが、安定した `v1` JSON 仕様を実装しています。
+> 状況: プロバイダー共通の CLI 基盤と、読み取り専用の Codex、Claude Code、ChatGPT Data Export アダプターが、安定した `v2` JSON 仕様を実装しています。
 
 ## ビルド
 
@@ -46,7 +46,7 @@ agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN]
 agent-sessions verify [--config PATH] [--root PATH] <source-ref>
 ```
 
-すべての操作は、安定した `v1` の JSON オブジェクトを一つ、標準出力に出力します。\
+すべての操作は、安定した `v2` の JSON オブジェクトを一つ、標準出力に出力します。\
 利用側は、ほかの応答フィールドを解釈する前に `schema_version` を確認しなければなりません。
 
 本番用の登録一覧には、`codex`、`claude`、`chatgpt` のプロバイダーアダプターが含まれます。\
@@ -56,7 +56,7 @@ agent-sessions verify [--config PATH] [--root PATH] <source-ref>
 `list` がプロバイダーの環境変数または既定のルートを使う場合、暗黙に選ばれたルートが存在しなくてもソースは増えず、登録済みのほかのプロバイダーの結果は妨げられません。\
 明示したルートと設定したルートは指定どおりに扱い、アクセスに失敗した場合はそれを報告します。
 
-[CLI JSON 仕様](docs/cli-json-contract.md) に、フィールド、ページ分割、上限、終了コード、完全性、秘匿化の動作を記載しています。
+[CLI JSON 仕様](docs/cli-json-contract.md) に、フィールド、ページ分割、上限、終了コード、完全性、内容の扱いを記載しています。
 
 ## 基本的な使い方
 
@@ -247,9 +247,13 @@ source X @ version A
 - 過去のセッションにあるコマンドを実行する。
 - 過去のプロンプトやモデル出力を現在の指示として扱う。
 - 記録に現れるという理由だけで、過去の URL やツール要求に従う。
-- 秘密情報を不必要に公開する。
 - 不完全な観測を完全なものとして黙って提示する。
 - 調査中にプロバイダーが所有する履歴を変更する。
+
+記録された内容は自動で隠さずに返すため、認証情報、パス、接続先、コマンドの文章を含むことがあります。\
+分析、保存、外部への共有の範囲は利用側が決めます。\
+v1 から更新する場合は、固定した実行ファイルを更新する前に v2 の出力形式と内容の方針へ対応してください。\
+詳しくは [v1 からの移行](docs/ja/cli-json-contract.md#v1-からの移行)を参照してください。
 
 リポジトリのフィクスチャは合成データでなければならず、実際のセッション内容、非公開リポジトリ情報、認証情報、ホスト名、ユーザー名、マシン固有のパスを含めてはなりません。
 
@@ -280,6 +284,7 @@ source X @ version A
 - [ADR 0001: ステートレスで読み取り専用のソースアクセスを使う](docs/decisions/0001-use-stateless-read-only-source-access.md)
 - [ADR 0002: プロバイダーのソースを名前付きインスタンスとしてモデル化する](docs/decisions/0002-model-provider-sources-as-named-instances.md)
 - [ADR 0003: プロバイダーの検出とバージョン依存のデコードを分離する](docs/decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md)
+- [ADR 0004: 記録された内容を上限付きで自動の隠蔽なしに返す](docs/decisions/0004-return-bounded-recorded-content-without-redaction.md)
 - [CLI JSON 仕様](docs/cli-json-contract.md)
 
 ## 開発時の検証

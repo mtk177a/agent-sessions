@@ -39,32 +39,32 @@ func TestPaginatedHistoryUsesCompletedItemsAsCanonicalRows(t *testing.T) {
 		t.Fatalf("canonical messages = %#v", result.Events[:2])
 	}
 	call, toolResult := result.Events[2].ToolCall, result.Events[3].ToolResult
-	if call == nil || toolResult == nil || call.CallID != toolResult.CallID || call.CallID == "command-1" || !contract.ValidIdentifier(call.CallID) || call.Action != "execute" || call.EvidenceState != contract.EvidenceAvailable || call.InputState != contract.InputWithheld || toolResult.EvidenceState != contract.EvidenceAbsent || result.Events[2].RecordedAt != "2026-09-03T10:00:02Z" || result.Events[3].RecordedAt != result.Events[2].RecordedAt {
+	if call == nil || toolResult == nil || call.CallID != toolResult.CallID || call.CallID == "command-1" || !contract.ValidIdentifier(call.CallID) || call.Action != "execute" || call.InputState != contract.InputAvailable || toolResult.ContentState != contract.EvidenceAbsent || result.Events[2].RecordedAt != "2026-09-03T10:00:02Z" || result.Events[3].RecordedAt != result.Events[2].RecordedAt {
 		t.Fatalf("normalized tool pair = %#v", result.Events[2:])
 	}
 	encoded, err := json.Marshal(result.Events)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"raw-call", "must not escape", "secret", "exec_command"} {
+	for _, forbidden := range []string{"raw-call", "duplicate", "exec_command"} {
 		if bytes.Contains(encoded, []byte(forbidden)) {
 			t.Fatalf("normalized events exposed %q", forbidden)
 		}
 	}
 }
 
-func TestPaginatedToolEvidenceUsesSafeResultLines(t *testing.T) {
+func TestPaginatedToolEvidenceRetainsRecordedLines(t *testing.T) {
 	home := t.TempDir()
 	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
 		header(testThreadID, "0.153.0", "paginated", ""),
 		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"command":"private","aggregated_output":"PASS\n3 tests passed\nsecret-token: fictional"}}}`,
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "tool_excerpt_redacted") {
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 {
 		t.Fatalf("Events() = %#v", result)
 	}
 	call, outcome := result.Events[0].ToolCall, result.Events[1].ToolResult
-	if call == nil || call.Action != "execute" || call.EvidenceState != contract.EvidenceAvailable || outcome == nil || outcome.Excerpt != "PASS\n3 tests passed" || outcome.EvidenceState != contract.EvidenceAvailable || !outcome.Redacted {
+	if call == nil || call.Action != "execute" || outcome == nil || outcome.Content.Text != "PASS\n3 tests passed\nsecret-token: fictional" || outcome.ContentState != contract.EvidenceAvailable || outcome.Content.Omitted {
 		t.Fatalf("tool evidence = %#v", result.Events)
 	}
 }
@@ -76,7 +76,7 @@ func TestCompletedToolInputPresenceAndInvalidTime(t *testing.T) {
 		`{"timestamp":"invalid","type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp-1","status":"completed","arguments":{},"result":{"content":[]}}}}`,
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 2 || result.Events[0].ToolCall.InputState != contract.InputWithheld || result.Events[0].TimeState != contract.TimeUnavailable || result.Events[1].TimeState != contract.TimeUnavailable || !hasOmission(result.Omissions, "event_time_omitted") || hasOmission(result.Omissions, "tool_input_unavailable") {
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || result.Events[0].ToolCall.InputState != contract.InputAvailable || result.Events[0].TimeState != contract.TimeUnavailable || result.Events[1].TimeState != contract.TimeUnavailable || !hasOmission(result.Omissions, "event_time_omitted") || hasOmission(result.Omissions, "tool_input_unavailable") {
 		t.Fatalf("Events() = %#v", result)
 	}
 }
@@ -102,29 +102,29 @@ func TestPaginatedStructuredToolResults(t *testing.T) {
 		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"DynamicToolCall","id":"dynamic-2","status":"completed","content_items":{"unexpected":"PASS"}}}}`,
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 6 || !hasOmission(result.Omissions, "tool_excerpt_unsupported") {
+	if result.Status != contract.StatusPartial || len(result.Events) != 6 || !hasOmission(result.Omissions, "tool_content_unavailable") {
 		t.Fatalf("Events() status = %s, events = %d, omissions = %#v", result.Status, len(result.Events), result.Omissions)
 	}
-	if result.Events[0].ToolCall.Action != "invoke" || result.Events[1].ToolResult.Excerpt != "OK" || result.Events[2].ToolCall.Action != "invoke" || result.Events[3].ToolResult.Excerpt != "2 checks passed" || result.Events[5].ToolResult.EvidenceState != contract.EvidenceUnsupported {
+	if result.Events[0].ToolCall.Action != "invoke" || result.Events[1].ToolResult.Content.Text != "OK" || result.Events[2].ToolCall.Action != "invoke" || result.Events[3].ToolResult.Content.Text != "2 checks passed" || result.Events[5].ToolResult.ContentState != contract.EvidenceUnsupported {
 		t.Fatalf("structured tool evidence = %#v", result.Events)
 	}
 }
 
-func TestCommandResultUsesPersistedTextFallback(t *testing.T) {
+func TestCommandResultRetainsDistinctPersistedFields(t *testing.T) {
 	empty, pass, failure := "", "PASS", "FAIL"
-	result := codexToolResult(completedItem{Type: "CommandExecution", AggregatedOutput: &empty, Stdout: &pass, Stderr: &failure}, "call-1", false)
-	if result.Excerpt != "PASS\nFAIL" || result.EvidenceState != contract.EvidenceAvailable || result.Redacted {
+	result := codexToolResult(completedItem{Type: "CommandExecution", AggregatedOutput: &empty, Stdout: &pass, Stderr: &failure}, "call-1")
+	if result.Content.Text != `{"aggregated_output":"","stderr":"FAIL","stdout":"PASS"}` || result.ContentState != contract.EvidenceAvailable || result.Content.Omitted {
 		t.Fatalf("stream result = %#v", result)
 	}
-	result = codexToolResult(completedItem{Type: "CommandExecution", FormattedOutput: &pass}, "call-2", true)
-	if result.Excerpt != "PASS" || result.EvidenceState != contract.EvidenceAvailable {
+	result = codexToolResult(completedItem{Type: "CommandExecution", FormattedOutput: &pass}, "call-2")
+	if result.Content.Text != "PASS" || result.ContentState != contract.EvidenceAvailable {
 		t.Fatalf("formatted result = %#v", result)
 	}
 }
 
-func TestPaginatedToolExcerptTruncationIsPartial(t *testing.T) {
+func TestPaginatedToolContentTruncationIsPartial(t *testing.T) {
 	home := t.TempDir()
-	output, err := json.Marshal(strings.Repeat("3 tests passed\n", 60))
+	output, err := json.Marshal(strings.Repeat("3 tests passed\n", 6000))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestPaginatedToolExcerptTruncationIsPartial(t *testing.T) {
 		`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-1","status":"completed","exit_code":0,"aggregated_output":` + string(output) + `}}}`,
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "tool_excerpt_truncated") || !result.Events[1].ToolResult.Truncated || len(result.Events[1].ToolResult.Excerpt) > contract.MaxToolExcerptBytes {
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "tool_content_truncated") || !result.Events[1].ToolResult.Content.Truncated || len(result.Events[1].ToolResult.Content.Text) > contract.MaxStringBytes {
 		t.Fatalf("bounded tool evidence = %#v", result)
 	}
 }
@@ -146,7 +146,7 @@ func TestLegacyPersistedToolOutputDoesNotGuessSuccess(t *testing.T) {
 		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"provider-call","output":"fictional output"}}`,
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].ToolCall == nil || !hasOmission(result.Omissions, "unsupported_tool_result") {
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || result.Events[0].ToolCall == nil || result.Events[1].ToolResult.Outcome != "unknown" || result.Events[1].ToolResult.Content.Text != "fictional output" {
 		t.Fatalf("Events() = %#v", result)
 	}
 }
@@ -240,7 +240,7 @@ func TestCorrelationFailuresArePartialAndNotGuessed(t *testing.T) {
 		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"orphan","output":"fictional output"}}`,
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].ToolCall == nil || result.Events[0].ToolCall.InputState != contract.InputUnavailable || !hasOmission(result.Omissions, "tool_input_unavailable") || !hasOmission(result.Omissions, "event_time_omitted") {
+	if result.Status != contract.StatusPartial || len(result.Events) != 4 || result.Events[0].ToolCall == nil || result.Events[0].ToolCall.InputState != contract.InputUnavailable || !hasOmission(result.Omissions, "tool_input_unavailable") || !hasOmission(result.Omissions, "event_time_omitted") {
 		t.Fatalf("Events() = %#v", result)
 	}
 }

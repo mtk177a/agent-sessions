@@ -7,8 +7,7 @@ import (
 )
 
 const (
-	SchemaVersion          = "v1"
-	RedactionPolicyVersion = "v1"
+	SchemaVersion = "v2"
 )
 
 type Status string
@@ -21,15 +20,14 @@ const (
 )
 
 type Envelope struct {
-	SchemaVersion          string       `json:"schema_version"`
-	CLIVersion             string       `json:"cli_version"`
-	RedactionPolicyVersion string       `json:"redaction_policy_version"`
-	Operation              string       `json:"operation"`
-	Status                 Status       `json:"status"`
-	Data                   *Data        `json:"data,omitempty"`
-	Page                   *Page        `json:"page,omitempty"`
-	Omissions              []Omission   `json:"omissions"`
-	Error                  *PublicError `json:"error,omitempty"`
+	SchemaVersion string       `json:"schema_version"`
+	CLIVersion    string       `json:"cli_version"`
+	Operation     string       `json:"operation"`
+	Status        Status       `json:"status"`
+	Data          *Data        `json:"data,omitempty"`
+	Page          *Page        `json:"page,omitempty"`
+	Omissions     []Omission   `json:"omissions"`
+	Error         *PublicError `json:"error,omitempty"`
 }
 
 type Data struct {
@@ -100,16 +98,26 @@ type Event struct {
 }
 
 type MessageEvent struct {
-	Role string `json:"role"`
-	Text string `json:"text"`
+	Role      string `json:"role"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
 }
 
 type ToolCallEvent struct {
-	CallID        string        `json:"call_id"`
-	Category      string        `json:"category"`
-	Action        string        `json:"action,omitempty"`
-	EvidenceState EvidenceState `json:"evidence_state,omitempty"`
-	InputState    InputState    `json:"input_state,omitempty"`
+	CallID     string     `json:"call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+	Category   string     `json:"category"`
+	Action     string     `json:"action,omitempty"`
+	InputState InputState `json:"input_state"`
+	Input      *Content   `json:"input,omitempty"`
+}
+
+// Content preserves recorded values; JSON may be incomplete after prefix truncation.
+type Content struct {
+	Format    string `json:"format"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
+	Omitted   bool   `json:"omitted,omitempty"`
 }
 
 type TimeState string
@@ -125,19 +133,18 @@ type InputState string
 
 const (
 	InputAbsent      InputState = "absent"
-	InputWithheld    InputState = "withheld"
+	InputAvailable   InputState = "available"
 	InputUnavailable InputState = "unavailable"
 	InputUnsupported InputState = "unsupported"
 )
 
 type ToolResultEvent struct {
-	CallID        string        `json:"call_id"`
-	Success       bool          `json:"success"`
-	ExitCode      *int          `json:"exit_code,omitempty"`
-	Excerpt       string        `json:"excerpt,omitempty"`
-	EvidenceState EvidenceState `json:"evidence_state,omitempty"`
-	Redacted      bool          `json:"redacted,omitempty"`
-	Truncated     bool          `json:"truncated,omitempty"`
+	CallID           string        `json:"call_id,omitempty"`
+	Outcome          string        `json:"outcome"`
+	ExitCode         *int          `json:"exit_code,omitempty"`
+	CorrelationState string        `json:"correlation_state"`
+	ContentState     EvidenceState `json:"content_state"`
+	Content          *Content      `json:"content,omitempty"`
 }
 
 type EvidenceState string
@@ -182,17 +189,16 @@ type PublicError struct {
 
 func NewEnvelope(operation, cliVersion string, status Status) Envelope {
 	return Envelope{
-		SchemaVersion:          SchemaVersion,
-		CLIVersion:             cliVersion,
-		RedactionPolicyVersion: RedactionPolicyVersion,
-		Operation:              operation,
-		Status:                 status,
-		Omissions:              []Omission{},
+		SchemaVersion: SchemaVersion,
+		CLIVersion:    cliVersion,
+		Operation:     operation,
+		Status:        status,
+		Omissions:     []Omission{},
 	}
 }
 
 func (e Envelope) Validate() error {
-	if e.SchemaVersion != SchemaVersion || e.RedactionPolicyVersion != RedactionPolicyVersion {
+	if e.SchemaVersion != SchemaVersion {
 		return errors.New("invalid contract version")
 	}
 	if e.Data != nil {

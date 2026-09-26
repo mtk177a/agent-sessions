@@ -392,8 +392,6 @@ func (a *Adapter) normalize(conversation rawConversation) ([]contract.Event, []c
 		}
 		switch classifyRole(message.Author.Role) {
 		case roleTool:
-			omissions = append(omissions, omission("correlation_omitted", "event", "A tool result without a stable provider-neutral correlation was omitted."))
-			continue
 		case roleMessage:
 		default:
 			omissions = append(omissions, omission("unknown_node", "event", "An unrecognized active-branch node was omitted."))
@@ -402,11 +400,22 @@ func (a *Adapter) normalize(conversation rawConversation) ([]contract.Event, []c
 		text, complete := messageText(message)
 		if !complete {
 			omissions = append(omissions, omission("unknown_node", "event", "Unsupported message content was omitted."))
-			if text == "" {
+			if text == "" && classifyRole(message.Author.Role) != roleTool {
 				continue
 			}
 		}
 		event := contract.Event{Kind: contract.EventMessage, Message: &contract.MessageEvent{Role: message.Author.Role, Text: text}, Metadata: []contract.Metadata{}}
+		if classifyRole(message.Author.Role) == roleTool {
+			content := contract.TextContent(text)
+			content.Omitted = !complete
+			result := contract.ToolResultEvent{Outcome: "unknown", CorrelationState: "unmatched", ContentState: contract.EvidenceAvailable, Content: content}
+			if !complete && text == "" {
+				result.Content = nil
+				result.ContentState = contract.EvidenceUnsupported
+			}
+			event.Kind, event.Message, event.ToolResult = contract.EventToolResult, nil, &result
+			omissions = append(omissions, contract.ToolResultOmissions(result)...)
+		}
 		if len(message.CreateTime) == 0 {
 			event.TimeState = contract.TimeAbsent
 		} else if at, ok := parseUnixSeconds(message.CreateTime); ok {

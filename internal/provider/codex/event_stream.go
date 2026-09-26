@@ -1,22 +1,19 @@
 package codex
 
 import (
-	"bytes"
 	"encoding/json"
 
 	"github.com/mtk177a/agent-sessions/internal/contract"
 )
 
 type eventNormalizer struct {
-	threadID       string
-	events         []contract.Event
-	omissions      []contract.Omission
-	calls          map[string]string
-	completedItems map[string]struct{}
+	threadID  string
+	events    []contract.Event
+	omissions []contract.Omission
 }
 
 func newEventNormalizer(threadID string) *eventNormalizer {
-	return &eventNormalizer{threadID: threadID, calls: map[string]string{}, completedItems: map[string]struct{}{}}
+	return &eventNormalizer{threadID: threadID}
 }
 
 func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
@@ -95,30 +92,35 @@ func (n *eventNormalizer) completed(profile storageProfile, item completedItem, 
 		} else {
 			n.omissions = append(n.omissions, omission("unknown_format", "events", "An assistant message content type was not recognized."))
 		}
+	case "FunctionCallOutput":
+		if profile == profileCanonicalizedLegacyPaginated {
+			n.omissions = append(n.omissions, omission("unsupported_event", "events", "A migrated completed output is not emitted because its legacy response row is canonical."))
+			return
+		}
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		body, state := legacyToolContent(fields["output"])
+		result := contract.ToolResultEvent{Outcome: "unknown", Content: body, ContentState: state}
+		metadata := []contract.Metadata{}
+		var name string
+		if json.Unmarshal(fields["name"], &name) == nil {
+			metadata = append(metadata, contract.Metadata{Name: "tool_name", Value: name})
+		}
+		n.events = append(n.events, contract.Event{Kind: contract.EventToolResult, ToolResult: &result, Metadata: metadata})
 	case "CommandExecution", "McpToolCall", "DynamicToolCall":
 		if profile == profileCanonicalizedLegacyPaginated {
 			n.omissions = append(n.omissions, omission("unsupported_event", "events", "A migrated completed tool item is not emitted because its legacy response rows are the canonical correlation evidence."))
 			return
 		}
-		if item.ID == "" {
-			n.omissions = append(n.omissions, omission("correlation_omitted", "events", "A completed tool item lacked a correlation identifier."))
-			return
-		}
-		if _, duplicate := n.completedItems[item.ID]; duplicate {
-			n.omissions = append(n.omissions, omission("duplicate_call_id", "events", "A completed provider tool identifier was duplicated."))
-			return
-		}
-		n.completedItems[item.ID] = struct{}{}
 		category := map[string]string{"CommandExecution": "shell", "McpToolCall": "mcp", "DynamicToolCall": "tool"}[item.Type]
 		action := "invoke"
 		if item.Type == "CommandExecution" {
 			action = "execute"
 		}
-		callID := normalizedCallID(n.threadID, item.ID)
-		n.events = append(n.events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable, InputState: completedInputState(item.Type, raw)}, Metadata: []contract.Metadata{}})
-		result := codexToolResult(item, callID, item.Status == "completed" || item.ExitCode != nil && *item.ExitCode == 0)
+		callID := toolCorrelationID(n.threadID, item.ID)
+		n.events = append(n.events, contract.Event{Kind: contract.EventToolCall, ToolCall: completedToolCall(n.threadID, item, raw, category, action), Metadata: codexToolMetadata(raw)})
+		result := codexToolResult(item, callID)
 		n.events = append(n.events, contract.Event{Kind: contract.EventToolResult, ToolResult: &result, Metadata: []contract.Metadata{}})
-		n.omissions = append(n.omissions, contract.ToolResultOmissions(result)...)
 	default:
 		if knownTurnItemType(item.Type) || item.Type == "Sleep" {
 			n.omissions = append(n.omissions, omission("unsupported_event", "events", "A recognized Codex item is not represented by the public event model."))
@@ -140,89 +142,115 @@ func (n *eventNormalizer) legacyResponse(raw json.RawMessage) {
 	}
 	switch item.Type {
 	case "function_call", "custom_tool_call", "local_shell_call":
-		if item.CallID == "" {
-			n.omissions = append(n.omissions, omission("correlation_omitted", "events", "A tool call lacked a correlation identifier."))
-			return
-		}
-		if _, duplicate := n.calls[item.CallID]; duplicate {
-			n.omissions = append(n.omissions, omission("duplicate_call_id", "events", "A provider tool call identifier was duplicated."))
-			n.calls[item.CallID] = ""
-			return
-		}
-		callID := normalizedCallID(n.threadID, item.CallID)
-		n.calls[item.CallID] = callID
+		callID := toolCorrelationID(n.threadID, item.CallID)
 		category, action := "tool", "invoke"
 		if item.Type == "local_shell_call" || item.Name == "exec_command" || item.Name == "shell" {
 			category, action = "shell", "execute"
 		} else if item.Name == "apply_patch" {
 			category, action = "file_change", "edit"
 		}
-		n.events = append(n.events, contract.Event{Kind: contract.EventToolCall, ToolCall: &contract.ToolCallEvent{CallID: callID, Category: category, Action: action, EvidenceState: contract.EvidenceAvailable, InputState: legacyInputState(item.Type, raw)}, Metadata: []contract.Metadata{}})
+		n.events = append(n.events, contract.Event{Kind: contract.EventToolCall, ToolCall: legacyToolCall(item.Type, item.Name, callID, raw, category, action), Metadata: codexToolMetadata(raw)})
 	case "function_call_output", "custom_tool_call_output":
-		if normalized, ok := n.calls[item.CallID]; ok && normalized != "" {
-			n.omissions = append(n.omissions, omission("unsupported_tool_result", "events", "A correlated tool result did not expose a safe success value."))
-			delete(n.calls, item.CallID)
-		} else {
-			n.omissions = append(n.omissions, omission("correlation_omitted", "events", "A tool result did not reference an earlier unique call."))
-		}
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		body, state := legacyToolContent(fields["output"])
+		result := contract.ToolResultEvent{CallID: toolCorrelationID(n.threadID, item.CallID), Outcome: "unknown", Content: body, ContentState: state}
+		n.events = append(n.events, contract.Event{Kind: contract.EventToolResult, ToolResult: &result, Metadata: []contract.Metadata{}})
 	}
+
 }
 
 func (n *eventNormalizer) finish() ([]contract.Event, []contract.Omission) {
-	for _, normalized := range n.calls {
-		if normalized != "" {
-			n.omissions = append(n.omissions, omission("correlation_omitted", "events", "A tool call did not have a safely correlated persisted result."))
-		}
-	}
 	if len(n.events) > maxNormalizedEvents {
 		n.events = n.events[:maxNormalizedEvents]
 		n.omissions = append(n.omissions, omission("resource_limit", "events", "The normalized event count exceeded the input limit."))
 	}
+	n.omissions = append(n.omissions, contract.ResolveToolCorrelations(n.events)...)
 	n.omissions = append(n.omissions, contract.EventTimeOmissions(n.events)...)
 	n.omissions = append(n.omissions, contract.ToolInputOmissions(n.events)...)
 	return n.events, n.omissions
 }
 
-func completedInputState(itemType string, raw json.RawMessage) contract.InputState {
-	field := "arguments"
-	if itemType == "CommandExecution" {
-		field = "command"
+func toolCorrelationID(threadID, id string) string {
+	if id == "" {
+		return ""
 	}
-	return inputFieldState(raw, field)
+	return normalizedCallID(threadID, id)
 }
-
-func legacyInputState(itemType string, raw json.RawMessage) contract.InputState {
-	switch itemType {
-	case "function_call":
-		return inputFieldState(raw, "arguments")
-	case "custom_tool_call":
-		return inputFieldState(raw, "input")
-	case "local_shell_call":
-		var fields map[string]json.RawMessage
-		if json.Unmarshal(raw, &fields) != nil {
-			return contract.InputUnsupported
-		}
-		if len(fields["action"]) == 0 {
-			return contract.InputUnavailable
-		}
-		return inputFieldState(fields["action"], "command")
-	default:
-		return contract.InputUnavailable
-	}
-}
-
-func inputFieldState(raw json.RawMessage, field string) contract.InputState {
+func completedToolCall(threadID string, item completedItem, raw json.RawMessage, category, action string) *contract.ToolCallEvent {
 	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) != nil || fields == nil {
-		return contract.InputUnsupported
+	_ = json.Unmarshal(raw, &fields)
+	field := "arguments"
+	name := ""
+	_ = json.Unmarshal(fields["tool"], &name)
+	if item.Type == "CommandExecution" {
+		field = "command"
+		name = item.Type
 	}
-	value, exists := fields[field]
-	if !exists {
-		return contract.InputUnavailable
+	content, state := contract.RecordedContent(fields[field])
+	if field == "arguments" && state == contract.EvidenceUnsupported && json.Valid(fields[field]) {
+		// Arguments are JSON values in the verified completed-item format.
+		content = contract.JSONContent(json.RawMessage(fields[field]))
+		state = contract.EvidenceAvailable
 	}
-	value = bytes.TrimSpace(value)
-	if len(value) == 0 || value[0] != '{' && value[0] != '[' && value[0] != '"' {
-		return contract.InputUnsupported
+	inputState := contract.InputState(state)
+	if state == contract.EvidenceAbsent {
+		inputState = contract.InputUnavailable
 	}
-	return contract.InputWithheld
+	if item.Type == "CommandExecution" && content != nil && (hasJSONValue(fields["cwd"]) || hasJSONValue(fields["interaction_input"])) {
+		input := map[string]json.RawMessage{"command": fields[field]}
+		for _, key := range []string{"cwd", "interaction_input"} {
+			if hasJSONValue(fields[key]) {
+				input[key] = fields[key]
+			}
+		}
+		content = contract.JSONContent(input)
+	}
+	call := &contract.ToolCallEvent{CallID: toolCorrelationID(threadID, item.ID), Name: name, Category: category, Action: action, Input: content, InputState: inputState}
+	return call
+}
+func legacyToolCall(itemType, name, id string, raw json.RawMessage, category, action string) *contract.ToolCallEvent {
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &fields)
+	field := "arguments"
+	if itemType == "custom_tool_call" {
+		field = "input"
+	}
+	if itemType == "local_shell_call" {
+		field = "action"
+		name = itemType
+	}
+	content, state := contract.RecordedContent(fields[field])
+	if itemType == "function_call" && content != nil && content.Format == "text" {
+		var original string
+		if json.Unmarshal(fields[field], &original) == nil && json.Valid([]byte(original)) {
+			content.Format = "json"
+		}
+	}
+	inputState := contract.InputState(state)
+	if state == contract.EvidenceAbsent {
+		inputState = contract.InputUnavailable
+	}
+	return &contract.ToolCallEvent{CallID: id, Name: name, Category: category, Action: action, Input: content, InputState: inputState}
+}
+
+// Legacy output text or verified text blocks do not establish an outcome.
+func legacyToolContent(raw json.RawMessage) (*contract.Content, contract.EvidenceState) {
+	if len(raw) > 0 && raw[0] == '[' {
+		return recordedTextBlocks(raw, "input_text")
+	}
+	return contract.RecordedContent(raw)
+}
+
+func codexToolMetadata(raw json.RawMessage) []contract.Metadata {
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &fields)
+	metadata := []contract.Metadata{}
+	for _, key := range []string{"server", "namespace"} {
+		var value string
+		if json.Unmarshal(fields[key], &value) == nil {
+			metadata = append(metadata, contract.Metadata{Name: key, Value: value})
+		}
+	}
+	return metadata
 }

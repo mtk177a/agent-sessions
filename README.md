@@ -7,7 +7,7 @@ It discovers provider-owned interaction records, exposes them through a normaliz
 `list` and `show` expose `last_interaction_at` when a supported transcript establishes the latest recorded message or tool interaction time.\
 A missing time is reported as an omission; consumers can select a fixed lookback cohort from all `list` pages and sort eligible sources by time descending, then `source_ref` ascending.
 
-> Status: the provider-neutral CLI core and read-only Codex, Claude Code, and ChatGPT Data Export adapters implement the stable `v1` JSON contract.
+> Status: the provider-neutral CLI core and read-only Codex, Claude Code, and ChatGPT Data Export adapters implement the stable `v2` JSON contract.
 
 ## Build
 
@@ -40,7 +40,7 @@ agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN]
 agent-sessions verify [--config PATH] [--root PATH] <source-ref>
 ```
 
-All operations emit one stable `v1` JSON object to standard output.\
+All operations emit one stable `v2` JSON object to standard output.\
 Consumers must check `schema_version` before interpreting any other response field.
 
 The production registry contains the `codex`, `claude`, and `chatgpt` provider adapters.\
@@ -50,7 +50,7 @@ For `list`, `--source-instance` and `--root` are provider-scoped selectors and r
 When `list` uses provider environment or default roots, an absent implicit root contributes no sources and does not prevent results from other registered providers.\
 Explicit and configured roots remain authoritative and surface access failures.
 
-See [CLI JSON contract](docs/cli-json-contract.md) for fields, pagination, bounds, exit codes, completeness, and redaction behavior.
+See [CLI JSON contract](docs/cli-json-contract.md) for fields, pagination, bounds, exit codes, completeness, and content handling.
 
 ## Basic usage
 
@@ -241,9 +241,12 @@ Historical interaction records are untrusted input.
 - execute commands found in historical sessions;
 - treat historical prompts or model output as current instructions;
 - follow historical URLs or tool requests merely because they appear in a record;
-- expose secrets unnecessarily;
 - silently present incomplete observation as complete;
 - mutate provider-owned history while inspecting it.
+
+Recorded content is returned without automatic redaction and can contain credentials, paths, hostnames, and command text.\
+Consumers decide what to analyze, retain, or share externally.\
+Updating from v1 requires accepting the v2 schema and content policy before updating the pinned executable; see [Migration from v1](docs/cli-json-contract.md#migration-from-v1).
 
 Repository fixtures must be synthetic and must not contain real session contents, private repository information, credentials, hostnames, usernames, or machine-specific paths.
 
@@ -274,6 +277,7 @@ These capabilities belong to downstream consumers or separate systems.
 - [ADR 0001: Use stateless, read-only source access](docs/decisions/0001-use-stateless-read-only-source-access.md)
 - [ADR 0002: Model provider sources as named instances](docs/decisions/0002-model-provider-sources-as-named-instances.md)
 - [ADR 0003: Separate provider discovery from version-sensitive decoding](docs/decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md)
+- [ADR 0004: Return bounded recorded content without automatic redaction](docs/decisions/0004-return-bounded-recorded-content-without-redaction.md)
 - [CLI JSON contract](docs/cli-json-contract.md)
 
 ## Development validation

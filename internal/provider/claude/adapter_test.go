@@ -40,14 +40,14 @@ func TestAdapterDiscoversAndNormalizesClaudeTranscript(t *testing.T) {
 		t.Fatalf("identity = %#v", got.Identity)
 	}
 	events := adapter.Events(context.Background(), source, got.Identity.ProviderSourceFingerprint)
-	if events.Status != contract.StatusPartial || len(events.Events) != 5 || !hasOmission(events.Omissions, "tool_excerpt_unavailable") {
+	if events.Status != contract.StatusComplete || len(events.Events) != 5 {
 		t.Fatalf("Events() = %#v", events)
 	}
 	if events.Events[0].Message == nil || events.Events[0].Message.Role != "user" || events.Events[1].Message == nil || events.Events[1].Message.Role != "assistant" {
 		t.Fatalf("messages = %#v", events.Events[:2])
 	}
 	call, result := events.Events[2].ToolCall, events.Events[3].ToolResult
-	if call == nil || result == nil || call.CallID != result.CallID || call.CallID == "provider-call" || call.Category != "shell" || !result.Success {
+	if call == nil || result == nil || call.CallID != result.CallID || call.CallID == "provider-call" || call.Category != "shell" || result.Outcome != "success" {
 		t.Fatalf("tool pair = %#v", events.Events[2:4])
 	}
 	if events.Events[4].Error == nil || events.Events[4].Error.Category != "provider" {
@@ -57,29 +57,29 @@ func TestAdapterDiscoversAndNormalizesClaudeTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"provider-call", "must not escape", "private output", "Bash"} {
+	for _, forbidden := range []string{"provider-call"} {
 		if bytes.Contains(encoded, []byte(forbidden)) {
 			t.Fatalf("normalized events exposed %q", forbidden)
 		}
 	}
 	evidence := adapter.Evidence(context.Background(), source, got.Identity.ProviderSourceFingerprint)
-	if evidence.Status != contract.StatusPartial || !hasOmission(evidence.Omissions, "tool_excerpt_unavailable") || len(evidence.Chunks) != 1 || evidence.Chunks[0].Name != "transcript/primary.jsonl" {
+	if evidence.Status != contract.StatusComplete || len(evidence.Chunks) != 1 || evidence.Chunks[0].Name != "transcript/primary.jsonl" {
 		t.Fatalf("Evidence() status = %s, omissions = %#v, chunks = %d", evidence.Status, evidence.Omissions, len(evidence.Chunks))
 	}
 }
 
-func TestClaudeToolEvidenceUsesSafeResultLines(t *testing.T) {
+func TestClaudeToolEvidenceRetainsRecordedLines(t *testing.T) {
 	home := t.TempDir()
 	writeTranscript(t, home, "fictional-project", testSessionID, []string{
 		row("assistant", `{"role":"assistant","content":[{"type":"tool_use","id":"safe-call","name":"Read","input":{"file_path":"/fictional/private"}}]}`, ""),
 		row("user", `{"role":"user","content":[{"type":"tool_result","tool_use_id":"safe-call","content":"PASS\n/fictional/private","is_error":false}]}`, ""),
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "tool_excerpt_redacted") {
+	if result.Status != contract.StatusComplete || len(result.Events) != 2 {
 		t.Fatalf("Events() = %#v", result)
 	}
 	call, outcome := result.Events[0].ToolCall, result.Events[1].ToolResult
-	if call == nil || call.Action != "read" || call.EvidenceState != contract.EvidenceAvailable || outcome == nil || outcome.Excerpt != "PASS" || outcome.EvidenceState != contract.EvidenceAvailable || !outcome.Redacted {
+	if call == nil || call.Action != "read" || outcome == nil || outcome.Content.Text != "PASS\n/fictional/private" || outcome.ContentState != contract.EvidenceAvailable || outcome.Content.Omitted {
 		t.Fatalf("tool evidence = %#v", result.Events)
 	}
 }
@@ -89,7 +89,7 @@ func TestClaudeToolInputPresenceAndEventTime(t *testing.T) {
 		row("assistant", `{"role":"assistant","content":[{"type":"tool_use","id":"empty","name":"Read","input":{}},{"type":"tool_use","id":"missing","name":"Read"},{"type":"tool_use","id":"invalid","name":"Read","input":null}]}`, ""),
 	}
 	events, omissions := normalizeRows(testSessionID, []byte(strings.Join(rows, "\n")))
-	if len(events) != 3 || events[0].ToolCall.InputState != contract.InputWithheld || events[1].ToolCall.InputState != contract.InputAbsent || events[2].ToolCall.InputState != contract.InputUnsupported || events[0].RecordedAt != "2026-09-03T10:00:00Z" || events[2].TimeState != contract.TimeAvailable || len(contract.ToolInputOmissions(events)) != 1 || len(omissions) != 3 {
+	if len(events) != 3 || events[0].ToolCall.InputState != contract.InputAvailable || events[1].ToolCall.InputState != contract.InputAbsent || events[2].ToolCall.InputState != contract.InputUnsupported || events[0].RecordedAt != "2026-09-03T10:00:00Z" || events[2].TimeState != contract.TimeAvailable || len(contract.ToolInputOmissions(events)) != 1 || len(omissions) != 3 {
 		t.Fatalf("events = %#v, omissions = %#v", events, omissions)
 	}
 	home := t.TempDir()
@@ -124,7 +124,7 @@ func TestClaudeStructuredToolResultOmitsNonText(t *testing.T) {
 		row("user", `{"role":"user","content":[{"type":"tool_result","tool_use_id":"structured-call","content":[{"type":"text","text":"PASS"},{"type":"image","source":{"data":"fictional"}}],"is_error":false}]}`, ""),
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "tool_excerpt_redacted") || result.Events[0].ToolCall.Action != "search" || result.Events[1].ToolResult.Excerpt != "PASS" || !result.Events[1].ToolResult.Redacted {
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "unsupported_content") || result.Events[0].ToolCall.Action != "search" || result.Events[1].ToolResult.Content.Text != "PASS" || !result.Events[1].ToolResult.Content.Omitted {
 		t.Fatalf("Events() = %#v", result)
 	}
 }
@@ -144,7 +144,7 @@ func TestObservedClaudeVersionIsSupported(t *testing.T) {
 		t.Fatalf("List() = %#v", listed)
 	}
 	events := adapter.Events(context.Background(), testSource(home), listed.Sources[0].Identity.ProviderSourceFingerprint)
-	if events.Status != contract.StatusPartial || len(events.Events) != 5 || !hasOmission(events.Omissions, "tool_excerpt_unavailable") || events.Events[2].ToolCall == nil || events.Events[3].ToolResult == nil || events.Events[3].ToolResult.Success || events.Events[4].Error == nil {
+	if events.Status != contract.StatusComplete || len(events.Events) != 5 || events.Events[2].ToolCall == nil || events.Events[3].ToolResult == nil || events.Events[3].ToolResult.Outcome == "success" || events.Events[4].Error == nil {
 		t.Fatalf("Events() = %#v", events)
 	}
 }
@@ -160,10 +160,10 @@ func TestContentAndCorrelationFailuresDegradeCompleteness(t *testing.T) {
 		`{broken`,
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 2 || result.Events[0].Message == nil || result.Events[1].ToolCall == nil {
+	if result.Status != contract.StatusPartial || len(result.Events) != 4 || result.Events[0].Message == nil || result.Events[1].ToolCall == nil || result.Events[3].ToolResult.Content.Text != "x" {
 		t.Fatalf("Events() = %#v", result)
 	}
-	for _, code := range []string{"unsupported_content", "duplicate_call_id", "correlation_omitted", "unknown_format", "malformed_record"} {
+	for _, code := range []string{"unsupported_content", "correlation_omitted", "unknown_format", "malformed_record"} {
 		if !hasOmission(result.Omissions, code) {
 			t.Fatalf("missing %q in %#v", code, result.Omissions)
 		}
@@ -177,7 +177,7 @@ func TestToolFailureAndDuplicateResultUseExplicitProviderSemantics(t *testing.T)
 		row("user", `{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-failure","content":"fictional","is_error":true},{"type":"tool_result","tool_use_id":"call-failure","content":"duplicate","is_error":false}]}`, ""),
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 2 || result.Events[1].ToolResult == nil || result.Events[1].ToolResult.Success || !hasOmission(result.Omissions, "duplicate_result") {
+	if result.Status != contract.StatusPartial || len(result.Events) != 3 || result.Events[1].ToolResult == nil || result.Events[1].ToolResult.Outcome != "failure" || result.Events[1].ToolResult.CorrelationState != "ambiguous" || result.Events[2].ToolResult.Content.Text != "duplicate" {
 		t.Fatalf("Events() = %#v", result)
 	}
 }
@@ -189,7 +189,7 @@ func TestNullToolErrorMarkerIsNotGuessedAsSuccess(t *testing.T) {
 		row("user", `{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-null","content":"fictional","is_error":null}]}`, ""),
 	})
 	result := eventsForOnlySource(t, home)
-	if result.Status != contract.StatusPartial || len(result.Events) != 1 || result.Events[0].ToolCall == nil || !hasOmission(result.Omissions, "malformed_record") {
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || result.Events[1].ToolResult.Content.Text != "fictional" || result.Events[1].ToolResult.Outcome != "unknown" || !hasOmission(result.Omissions, "malformed_record") {
 		t.Fatalf("Events() = %#v", result)
 	}
 }
@@ -478,7 +478,7 @@ func TestProviderTreeIsUnchangedByReadOnlyCLI(t *testing.T) {
 	}
 }
 
-func TestCLIOutputRedactsProviderText(t *testing.T) {
+func TestCLIOutputRetainsProviderText(t *testing.T) {
 	home := t.TempDir()
 	writeTranscript(t, home, "fictional-project", testSessionID, []string{
 		row("user", `{"role":"user","content":"token=sk-fictional-secret /fictional/private"}`, ""),
@@ -491,8 +491,8 @@ func TestCLIOutputRedactsProviderText(t *testing.T) {
 		t.Fatalf("events exit = %d, output = %s", exit, output.String())
 	}
 	for _, forbidden := range []string{"sk-fictional-secret", "/fictional/private"} {
-		if bytes.Contains(output.Bytes(), []byte(forbidden)) {
-			t.Fatalf("CLI output exposed %q: %s", forbidden, output.String())
+		if !bytes.Contains(output.Bytes(), []byte(forbidden)) {
+			t.Fatalf("CLI output removed %q: %s", forbidden, output.String())
 		}
 	}
 }

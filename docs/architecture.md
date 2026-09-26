@@ -177,7 +177,7 @@ source instance
 provider-native source ID
 ```
 
-The stable `v1` CLI uses a deterministic reference with this form:
+The stable `v2` CLI uses a deterministic reference with this form:
 
 ```text
 as0:<provider>:<source-instance>:<source-id-fingerprint>
@@ -516,14 +516,16 @@ The security boundary requires the following:
 
 - No historical instruction gains authority by appearing in a source record.
 - The access layer must not execute historical content or follow historical instructions.
-- Output does not expose secrets that are not required for the requested operation.
+- Recorded content is returned without automatic redaction, including credential-like values and paths.
+- Consumers own content selection for analysis, retention, and external sharing.
+- Structured CLI diagnostics do not unnecessarily copy source data.
 - Provider adapters require resource limits for malformed, nested, compressed, oversized, or otherwise adversarial input.
 - Committed tests and fixtures must be synthetic.
 - Real private session data must not be converted into committed fixtures, even after manual redaction.
 
 ## Implemented CLI core
 
-The provider-neutral Go executable implements the stable `v1` machine-readable contract for the following operations.
+The provider-neutral Go executable implements the stable `v2` machine-readable contract for the following operations.
 
 The operations are:
 
@@ -552,7 +554,7 @@ Perform the stronger read needed to verify source identity, readability, complet
 
 No command implies that a downstream consumer has reviewed or accepted a source.
 
-The stable fields, exit codes, pagination behavior, bounds, compatibility rule, and final-redaction policy are documented in [CLI JSON contract](cli-json-contract.md).
+The stable fields, exit codes, pagination behavior, bounds, compatibility rule, and content-handling policy are documented in [CLI JSON contract](cli-json-contract.md).
 
 The current executable contains the provider-neutral core and the production Codex, Claude Code, and ChatGPT Data Export adapters.
 

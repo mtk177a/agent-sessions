@@ -69,6 +69,37 @@ func TestLegacyV2RetainsRawInputsAndInputTextResults(t *testing.T) {
 	}
 }
 
+func TestLargeLegacyResultHistoryAllowsMinimumPage(t *testing.T) {
+	home := t.TempDir()
+	rows := []string{header(testThreadID, "0.149.1", "legacy", "")}
+	for i := 0; i < 40000; i++ {
+		rows = append(rows, `{"timestamp":"2026-09-03T10:00:01Z","type":"response_item","payload":{"type":"function_call_output","output":"fictional result"}}`)
+	}
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), rows)
+	runner := cli.Runner{Version: "test", Registry: provider.NewRegistry(New())}
+	ref := contract.NewSourceRef("codex", "codex-default", testThreadID)
+	var output bytes.Buffer
+	if exit := runner.Run(t.Context(), []string{"events", "--root", home, "--limit", "1", ref}, &output); exit != cli.ExitOK {
+		t.Fatalf("exit %d: %s", exit, output.String())
+	}
+	var envelope contract.Envelope
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Status != contract.StatusPartial || len(*envelope.Data.Events) != 1 || (*envelope.Data.Events)[0].ToolResult.Content.Text != "fictional result" || !envelope.Page.HasMore {
+		t.Fatal("large legacy history lost content or pagination")
+	}
+	counts := map[string]int{}
+	for _, omission := range envelope.Omissions {
+		if omission.Scope == "tool_result" {
+			counts[omission.Code] += omission.Count
+		}
+	}
+	if counts["tool_outcome_unknown"] != 40000 || counts["correlation_omitted"] != 40000 {
+		t.Fatalf("incorrect history counts: %#v", counts)
+	}
+}
+
 func TestV2ReadsRecordedCommandsWithoutExecutingOrWriting(t *testing.T) {
 	home := t.TempDir()
 	command := []string{"touch", filepath.Join(home, "fictional-execution-marker")}

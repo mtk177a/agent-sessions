@@ -124,6 +124,88 @@ type eventResultAdapter struct {
 	result provider.EventResult
 }
 
+func TestLargeOmissionHistoryAllowsMinimumPages(t *testing.T) {
+	adapter := newSyntheticAdapter()
+	const count = 40000
+	adapter.events = make([]contract.Event, count)
+	for i := range adapter.events {
+		adapter.events[i] = contract.Event{Kind: contract.EventToolResult, ToolResult: &contract.ToolResultEvent{Outcome: "unknown", ContentState: contract.EvidenceAvailable, Content: contract.TextContent("fictional result")}, Metadata: []contract.Metadata{}}
+	}
+	omissions := contract.ResolveToolCorrelations(adapter.events)
+	raw, err := json.Marshal(omissions)
+	if err != nil || len(raw) <= MaxResponseBytes {
+		t.Fatal("fixture does not reproduce oversized history notifications")
+	}
+	runner := Runner{Version: "test", Registry: provider.NewRegistry(&eventResultAdapter{syntheticAdapter: adapter, result: provider.EventResult{Status: contract.StatusPartial, Events: adapter.events, Omissions: omissions}})}
+	root := t.TempDir()
+	cursor := ""
+	for page := 0; page < 2; page++ {
+		args := []string{"events", "--root", root, "--limit", "1"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		args = append(args, adapter.source.Identity.SourceRef)
+		var output bytes.Buffer
+		if exit := runner.Run(t.Context(), args, &output); exit != ExitOK {
+			t.Fatalf("page %d exit %d: %s", page, exit, output.String())
+		}
+		var envelope contract.Envelope
+		if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Status != contract.StatusPartial || len(*envelope.Data.Events) != 1 || (*envelope.Data.Events)[0].Index != uint64(page) || (*envelope.Data.Events)[0].ToolResult.Content.Text != "fictional result" || !envelope.Page.HasMore {
+			t.Fatal("page lost content, order, or completeness")
+		}
+		for _, code := range []string{"tool_outcome_unknown", "correlation_omitted"} {
+			found := 0
+			for _, omission := range envelope.Omissions {
+				if omission.Code == code && omission.Scope == "tool_result" {
+					found++
+					if omission.Count != count {
+						t.Fatalf("%s count = %d", code, omission.Count)
+					}
+				}
+			}
+			if found != 1 {
+				t.Fatalf("%s has %d notifications", code, found)
+			}
+		}
+		cursor = envelope.Page.NextCursor
+	}
+}
+
+func TestToolEvidenceOmissionValidationUsesCounts(t *testing.T) {
+	events := []contract.Event{{ToolResult: &contract.ToolResultEvent{Outcome: "unknown", CorrelationState: "matched"}}, {ToolResult: &contract.ToolResultEvent{Outcome: "unknown", CorrelationState: "matched"}}}
+	omissions := []contract.Omission{{Code: "tool_outcome_unknown", Scope: "tool_result", Count: 2}}
+	if err := validateToolEvidenceOmissions(events, omissions); err != nil {
+		t.Fatal(err)
+	}
+	omissions[0].Count = 1
+	if err := validateToolEvidenceOmissions(events, omissions); err == nil {
+		t.Fatal("insufficient count accepted")
+	}
+}
+
+func TestToolOmissionAggregationPreservesDistinctEvidence(t *testing.T) {
+	omissions := []contract.Omission{
+		{Code: "correlation_omitted", Scope: "tool_call", Message: "missing identifier"},
+		{Code: "pagination", Scope: "events", Message: "more events"},
+		{Code: "correlation_omitted", Scope: "tool_call", Message: "missing identifier", Count: 3},
+		{Code: "correlation_omitted", Scope: "tool_call", Message: "missing result"},
+		{Code: "correlation_omitted", Scope: "tool_result", Message: "missing identifier"},
+	}
+	got := aggregateToolOmissions(omissions)
+	if len(got) != 4 || got[0].Count != 4 || got[1] != omissions[1] || got[2].Message != "missing result" || got[2].Count != 1 || got[3].Scope != "tool_result" || omissions[0].Count != 0 {
+		t.Fatalf("aggregation changed distinct evidence or source: %#v", got)
+	}
+	again := aggregateToolOmissions(got)
+	for i := range got {
+		if again[i] != got[i] {
+			t.Fatal("repeated preparation changed counts")
+		}
+	}
+}
+
 func (a *eventResultAdapter) Events(context.Context, config.Source, string) provider.EventResult {
 	return a.result
 }

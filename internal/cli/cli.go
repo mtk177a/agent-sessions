@@ -385,10 +385,38 @@ func (r Runner) write(output io.Writer, envelope contract.Envelope, exit int) in
 }
 
 func prepareEnvelope(envelope *contract.Envelope) error {
+	envelope.Omissions = aggregateToolOmissions(envelope.Omissions)
 	if err := contract.EnforceBounds(envelope); err != nil {
 		return err
 	}
 	return envelope.Validate()
+}
+
+// Tool omissions without count describe one observation. Other scopes may
+// describe an unknown number of values and retain their original representation.
+func aggregateToolOmissions(omissions []contract.Omission) []contract.Omission {
+	result := make([]contract.Omission, 0)
+	positions := map[contract.Omission]int{}
+	for _, omission := range omissions {
+		if omission.Scope != "tool_call" && omission.Scope != "tool_result" {
+			result = append(result, omission)
+			continue
+		}
+		key := omission
+		key.Count = 0
+		count := omission.Count
+		if count == 0 {
+			count = 1
+		}
+		if index, exists := positions[key]; exists {
+			result[index].Count += count
+		} else {
+			positions[key] = len(result)
+			omission.Count = count
+			result = append(result, omission)
+		}
+	}
+	return result
 }
 
 func (r Runner) fallbackEnvelope(operation, code, category, message string) contract.Envelope {
@@ -657,7 +685,11 @@ func validateToolEvidenceOmissions(events []contract.Event, omissions []contract
 	available := map[string]int{}
 	for _, omission := range omissions {
 		if omission.Scope == "tool_result" {
-			available[omission.Code]++
+			count := omission.Count
+			if count == 0 {
+				count = 1
+			}
+			available[omission.Code] += count
 		}
 	}
 	for _, event := range events {

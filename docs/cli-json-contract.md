@@ -1,6 +1,35 @@
 # CLI JSON contract
 
-## Compatibility status
+Use this reference when writing scripts that call `agent-sessions` or interpret its JSON output.\
+For installation and a first read, start with the [README](../README.md).\
+Provider-specific roots, accepted formats, and input limits are documented for [Codex](codex.md), [Claude Code](claude.md), and [ChatGPT Data Export](chatgpt.md).
+
+## Calling commands
+
+```text
+agent-sessions list [--config PATH] [--provider ID [--source-instance ID] [--root PATH]] [--limit N] [--cursor TOKEN]
+agent-sessions show [--config PATH] [--root PATH] <source-ref>
+agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
+agent-sessions verify [--config PATH] [--root PATH] <source-ref>
+```
+
+Copy `<source-ref>` from `identity.source_ref` in a `list` response; do not construct it from a file path.\
+Put flags before the positional source reference.
+
+| Option | Applies to | Meaning |
+| --- | --- | --- |
+| `--config PATH` | All operations | Read the selected strict JSON configuration file. |
+| `--provider ID` | `list` | Select one provider; absent means combine available providers. |
+| `--source-instance ID` | `list`, with `--provider` | Select one named store or export boundary. |
+| `--root PATH` | All operations; requires `--provider` for `list` | Override the provider-level root for this invocation. |
+| `--limit N` | `list`, `events` | Set page size; default 50, maximum 100. |
+| `--cursor TOKEN` | `list`, `events` | Continue with the opaque cursor returned by the previous page. |
+
+For a source listed from an explicit root, pass that root to subsequent source operations or configure the instance.\
+A source reference does not contain the root's path.\
+See [configuration](#configuration) for root resolution and [completeness and omissions](#completeness-and-omissions) for pagination.
+
+## Response envelope
 
 The public response schema is stable `v2`.\
 The same contract is implemented by the production Codex, Claude Code, and ChatGPT Data Export adapters.
@@ -57,9 +86,6 @@ The configuration schema is separately validated and currently accepts exactly `
 `list` returns `data.sources` and a `page` object.\
 Sources are sorted by logical source reference before offset pagination is applied.
 
-Each source requires `identity`, `kind`, `relationships`, and `metadata`.\
-`version_hint`, `last_interaction_at`, and `identity.provider_native_source_id` are optional; all other identity fields are required.
-
 ### `show <source-ref>`
 
 `show` returns one normalized source as `data.source`.
@@ -73,11 +99,19 @@ Event indexes are zero-based and preserve provider order.
 
 `verify` returns `data.source_ref` and `data.verified_version`.
 
+Use this content version for provenance or to compare observations of the same source.\
+Verification does not mark the source as reviewed or retain a transcript.
+
+### Verified-version encoding
+
 The verified version is SHA-256 over a domain separator followed by name-sorted evidence chunks.\
 Each chunk name and content is prefixed with its unsigned 64-bit big-endian byte length, and duplicate chunk names are rejected.
 
 `verified_version` requires `algorithm`, `basis`, and `value`.\
 The current values use `sha256`, `provider-content-v0`, and a `sha256:`-prefixed digest.
+
+The hash uses its own `v0` domain separator and `provider-content-v0` basis, independently from `schema_version`.\
+They change only when the hashing meaning or algorithm changes.
 
 ### Operation data and page objects
 
@@ -93,34 +127,15 @@ The `data` object contains only the fields for the requested operation:
 A `page` object requires integer `limit` and Boolean `has_more`.\
 `next_cursor` is required when `has_more` is true and absent otherwise.
 
-Every omission requires token-valued `code` and `scope` plus a safe human-readable `message`.\
-The optional positive integer `count` reports how many known items that omission represents; its absence does not imply zero affected provider values.
+## Sources
 
-Each metadata entry requires token-valued `name` and a safe string `value`.\
-Metadata names do not grant provider-specific values a provider-neutral meaning.
+A source is one addressable session or conversation.\
+A source instance is its named provider store or export boundary.
 
-Each relationship requires `kind` and `source_ref`.\
-The currently emitted relationship kinds are `parent` and `forked_from`, both based only on explicit provider-owned identity fields.\
-An adapter omits a relationship it cannot identify safely rather than deriving one from paths or event order.
+Each source requires `identity`, `kind`, `relationships`, and `metadata`.\
+`version_hint`, `last_interaction_at`, and `identity.provider_native_source_id` are optional; all other identity fields are required.
 
-Source `kind` is an extensible token; the currently emitted values are `session` for Codex and Claude Code records and `conversation` for ChatGPT Data Export conversations.\
-Consumers must not reject an otherwise valid `v2` response solely because a source uses an unrecognized `kind` token.
-
-When present, `version_hint` requires `kind` and `value`, and its `kind` is also extensible.\
-Codex sources without inherited history and Claude Code emit `stat_hash` for inexpensive change detection; Codex sources with safely resolved inherited history emit `content_hash` for the included rollout ranges.\
-ChatGPT Data Export emits `snapshot_hash` for the SHA-256 identity of the complete export ZIP.\
-Consumers may use a recognized hint for change detection and must ignore an unrecognized hint kind.
-
-`last_interaction_at`, when present, is a canonical UTC RFC 3339 timestamp ending in `Z`.\
-It is the latest recorded user or assistant message, tool call, or tool result time in the logical source; management rows, system notifications, and file modification times are excluded.\
-It is absent if no interaction exists or the maximum cannot be established safely, including missing or malformed activity timestamps, unknown potentially interactive rows, versions outside the provider's interaction-time compatibility boundary, ambiguous artifacts, and unresolved inherited history.\
-Such absence adds `source_time_unavailable` with `scope: source` and makes `list` or `show` partial; `count` may aggregate affected sources.\
-For ChatGPT Data Export, the selected active branch defines the interactions considered; other branches do not advance this field.
-
-For a fixed lookback cohort, a consumer collects every `list` page, excludes sources without `last_interaction_at` from the known-time subset, compares timestamps as absolute instants, then sorts eligible sources by `last_interaction_at` descending and `identity.source_ref` ascending.\
-A partial listing, including a missing source time or an unfinished page, cannot establish that the cohort is exhaustive.
-
-## Logical identity
+### Logical identity
 
 A source identity separates:
 
@@ -145,6 +160,38 @@ The fingerprint and source reference remain available when the raw value is omit
 
 The `as0` prefix and the source fingerprint's `v0` domain separator are versioned independently from `schema_version`.\
 They do not change merely because the public response schema has reached `v2`.
+
+### Kind, relationships, and metadata
+
+Each metadata entry requires token-valued `name` and a safe string `value`.\
+Metadata names do not grant provider-specific values a provider-neutral meaning.
+
+Each relationship requires `kind` and `source_ref`.\
+The currently emitted relationship kinds are `parent` and `forked_from`, both based only on explicit provider-owned identity fields.\
+An adapter omits a relationship it cannot identify safely rather than deriving one from paths or event order.
+
+Source `kind` is an extensible token; the currently emitted values are `session` for Codex and Claude Code records and `conversation` for ChatGPT Data Export conversations.\
+Consumers must not reject an otherwise valid `v2` response solely because a source uses an unrecognized `kind` token.
+
+### Version hints
+
+When present, `version_hint` requires `kind` and `value`, and its `kind` is also extensible.\
+Codex sources without inherited history and Claude Code emit `stat_hash` for inexpensive change detection; Codex sources with safely resolved inherited history emit `content_hash` for the included rollout ranges.\
+ChatGPT Data Export emits `snapshot_hash` for the SHA-256 identity of the complete export ZIP.\
+Consumers may use a recognized hint for change detection and must ignore an unrecognized hint kind.
+
+### Source interaction time
+
+`last_interaction_at`, when present, is a canonical UTC RFC 3339 timestamp ending in `Z`.\
+It is the latest recorded user or assistant message, tool call, or tool result time in the logical source; management rows, system notifications, and file modification times are excluded.\
+It is absent if no interaction exists or the maximum cannot be established safely, including missing or malformed activity timestamps, unknown potentially interactive rows, versions outside the provider's interaction-time compatibility boundary, ambiguous artifacts, and unresolved inherited history.\
+Such absence adds `source_time_unavailable` with `scope: source` and makes `list` or `show` partial; `count` may aggregate affected sources.\
+For ChatGPT Data Export, the selected active branch defines the interactions considered; other branches do not advance this field.
+
+#### Selecting recent sources
+
+For a fixed lookback cohort, a consumer collects every `list` page, excludes sources without `last_interaction_at` from the known-time subset, compares timestamps as absolute instants, then sorts eligible sources by `last_interaction_at` descending and `identity.source_ref` ascending.\
+A partial listing, including a missing source time or an unfinished page, cannot establish that the cohort is exhaustive.
 
 ## Events
 
@@ -213,6 +260,9 @@ It does not promote an unstable provider field into the stable schema or claim `
 
 ## Completeness and omissions
 
+Every omission requires token-valued `code` and `scope` plus a safe human-readable `message`.\
+The optional positive integer `count` reports how many known items that omission represents; its absence does not imply zero affected provider values.
+
 | Status | Meaning |
 | --- | --- |
 | `complete` | No material value was omitted, truncated, unsupported, or unknown. |
@@ -232,6 +282,21 @@ Cursor contents are opaque to consumers.
 
 The current cursor begins with `v0:`.\
 That cursor format version is independent from `schema_version`.
+
+### Read the next page
+
+For every response, validate `schema_version`, inspect `status` and `omissions`, and consume any available operation data.\
+For `list` and `events`, pass `page.next_cursor` unchanged to the same operation when `page.has_more` is true:
+
+```sh
+agent-sessions list --provider codex --limit 50 --cursor '<page.next_cursor>'
+agent-sessions events --limit 50 --cursor '<page.next_cursor>' '<source_ref>'
+```
+
+Keep the same source selection, including any explicit root or configuration.\
+Continue until `has_more` is false, retaining omissions from all pages.\
+Finishing pagination does not resolve other omissions, and exit code `0` does not establish completeness.\
+See [content handling](#content-handling) for source changes between pages and individually truncated bodies.
 
 ## Structured errors and exit codes
 
@@ -272,9 +337,18 @@ Configuration is strict JSON:
 {
   "schema_version": "v1",
   "sources": [
-    {"id": "example-default", "provider": "example", "root": "/fictional/root"}
+    {"id": "codex-one", "provider": "codex", "root": "/fictional/codex-one"},
+    {"id": "codex-two", "provider": "codex", "root": "/fictional/codex-two"}
   ]
 }
+```
+
+This example configures two independent Codex homes.\
+Replace each `root` with its actual absolute path.\
+Choose stable `id` values: renaming an instance changes its source references.
+
+```sh
+agent-sessions list --provider codex --source-instance codex-one
 ```
 
 Provider and source instance IDs match `[a-z][a-z0-9-]{0,62}`.\

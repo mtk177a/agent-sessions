@@ -4,7 +4,36 @@
 > この日本語版は参考訳です。
 > 内容に差異がある場合は英語版を優先します。
 
-## 互換性の状態
+この文書は、`agent-sessions` を呼び出すスクリプトや、JSON 出力を解釈する処理を実装するときに使う。\
+インストールと最初の読み取りは [README](../../README.ja.md) を参照する。\
+プロバイダー固有のルート、対応形式、入力上限は、[Codex](codex.md)、[Claude Code](claude.md)、[ChatGPT Data Export](chatgpt.md) に記載する。
+
+## コマンドの呼び出し
+
+```text
+agent-sessions list [--config PATH] [--provider ID [--source-instance ID] [--root PATH]] [--limit N] [--cursor TOKEN]
+agent-sessions show [--config PATH] [--root PATH] <source-ref>
+agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
+agent-sessions verify [--config PATH] [--root PATH] <source-ref>
+```
+
+`<source-ref>` には、`list` 応答の `identity.source_ref` をコピーし、ファイルパスから作らない。\
+フラグは位置引数のソース参照より前に置く。
+
+| オプション | 対象 | 意味 |
+| --- | --- | --- |
+| `--config PATH` | 全操作 | 指定した厳密な JSON 設定ファイルを読む。 |
+| `--provider ID` | `list` | 一つのプロバイダーを選ぶ。省略時は利用可能なプロバイダーをまとめる。 |
+| `--source-instance ID` | `--provider` を指定した `list` | 名前付きの保存場所やエクスポートを一つ選ぶ。 |
+| `--root PATH` | 全操作。`list` では `--provider` が必要 | 今回の呼び出しでプロバイダー単位のルートを上書きする。 |
+| `--limit N` | `list`、`events` | ページサイズを指定する。既定 50、最大 100。 |
+| `--cursor TOKEN` | `list`、`events` | 前のページが返した不透明なカーソルで続きを取得する。 |
+
+明示したルートから一覧にしたソースを読む場合は、後続の操作にもそのルートを渡すか、インスタンスを設定する。\
+ソース参照はルートのパスを含まない。\
+ルートの解決は [設定](#設定)、ページ分割は [完全性と省略](#完全性と省略) を参照する。
+
+## 応答全体の構造
 
 公開レスポンススキーマは安定版 `v2` である。\
 同じ仕様を、実運用の Codex、Claude Code、ChatGPT Data Export アダプターが実装する。
@@ -61,9 +90,6 @@
 `list` は `data.sources` と `page` オブジェクトを返す。\
 ソースは、オフセットによるページ分割を適用する前に論理ソース参照で並べ替える。
 
-各ソースには `identity`、`kind`、`relationships`、`metadata` が必要である。\
-`version_hint`、`last_interaction_at`、`identity.provider_native_source_id` は任意であり、その他の識別フィールドはすべて必須である。
-
 ### `show <source-ref>`
 
 `show` は `data.source` として、正規化した一つのソースを返す。
@@ -77,11 +103,19 @@
 
 `verify` は `data.source_ref` と `data.verified_version` を返す。
 
+出所の証拠や、同じソースの観測結果の比較に、この内容バージョンを使う。\
+検証しても、ソースをレビュー済みにはせず、対話記録も保存しない。
+
+### 検証済みバージョンの符号化
+
 検証済みバージョンは、ドメイン区切り文字と名前順に並べた証拠チャンクから計算する SHA-256 である。\
 各チャンクの名前と内容には、符号なし 64 ビット・ビッグエンディアンのバイト長を前置し、重複するチャンク名は拒否する。
 
 `verified_version` には `algorithm`、`basis`、`value` が必要である。\
 現在の値はそれぞれ `sha256`、`provider-content-v0`、`sha256:` を先頭に付けたダイジェストである。
+
+ハッシュには、`schema_version` から独立した専用の `v0` ドメイン分離子と `provider-content-v0` という基準を使う。\
+ハッシュ化の意味またはアルゴリズムが変わる場合にだけ、これらを変更する。
 
 ### 操作データとページオブジェクト
 
@@ -97,39 +131,15 @@
 `page` オブジェクトには整数の `limit` と Boolean の `has_more` が必要である。\
 `has_more` が true の場合は `next_cursor` が必要で、それ以外では存在しない。
 
-各省略には、トークン値の `code` と `scope`、安全な人間向けの `message` が必要である。\
-任意の正の整数 `count` は、その省略が表す既知の項目数を示す。\
-これがないことは、影響を受けるプロバイダー値が 0 件であることを意味しない。
+## ソース
 
-各メタデータエントリには、トークン値の `name` と安全な文字列 `value` が必要である。\
-メタデータ名によって、プロバイダー固有の値にプロバイダーに依存しない意味を与えてはならない。
+ソースは、個別に指定できる一つのセッションや会話である。\
+ソースインスタンスは、それを含むプロバイダーの保存場所やエクスポートに付ける名前である。
 
-各関係には `kind` と `source_ref` が必要である。\
-現在出力する関係種別は `parent` と `forked_from` で、どちらも明示されたプロバイダー所有の識別フィールドだけに基づく。\
-安全に識別できない関係は、パスやイベント順から導出せず、アダプターが省略する。
+各ソースには `identity`、`kind`、`relationships`、`metadata` が必要である。\
+`version_hint`、`last_interaction_at`、`identity.provider_native_source_id` は任意であり、その他の識別フィールドはすべて必須である。
 
-ソースの `kind` は拡張可能なトークンである。\
-現在出力する値は、Codex と Claude Code の記録では `session`、ChatGPT Data Export の会話では `conversation` である。\
-利用者は、ソースが認識していない `kind` トークンを使っているというだけで、その他は有効な `v2` レスポンスを拒否してはならない。
-
-存在する場合、`version_hint` には `kind` と `value` が必要で、`kind` も拡張可能である。\
-継承履歴のない Codex ソースと Claude Code は安価な変更検出のために `stat_hash` を出力する。\
-継承履歴を安全に解決できた Codex ソースは、採用したロールアウトの範囲に対する `content_hash` を出力する。\
-ChatGPT Data Export はエクスポート ZIP 全体の SHA-256 識別子として `snapshot_hash` を出力する。\
-利用者は認識済みのヒントを変更検出に使ってよく、認識していないヒント種別は無視しなければならない。
-
-`last_interaction_at` がある場合、その値は末尾が `Z` の正規化された UTC の RFC 3339 時刻である。\
-一つの論理ソースに記録されたユーザーまたはアシスタントのメッセージ、ツール呼び出し、ツール結果のうち、最も遅い時刻を表す。\
-管理用の行、システム通知、ファイルの更新時刻は含めない。\
-やり取りがない場合や、活動行の時刻の欠落・不正値、やり取りの可能性がある未知の行、プロバイダーの時刻用互換性境界に含まれない版、曖昧な成果物、継承履歴を解決できないことによって最終時刻を安全に確定できない場合、このフィールドはない。\
-その場合は `scope: source` の `source_time_unavailable` を追加し、`list` または `show` を `partial` にする。\
-`count` で影響するソース数をまとめて示す場合がある。\
-ChatGPT Data Export では選択中の会話経路にあるやり取りを対象とし、別の分岐によってこのフィールドは進まない。
-
-一定期間内の対象を選ぶ利用者は、`list` の全ページを取得し、`last_interaction_at` がないソースを時刻が分かる対象から除外し、絶対日時として比較した後、時刻の降順と `identity.source_ref` の昇順で並べる。\
-ソースの時刻が欠けている場合や未取得のページがある場合など、`partial` の一覧からは対象の全件を確定できない。
-
-## 論理識別子
+### 論理識別子
 
 ソース識別子は、次の情報を分離する。
 
@@ -154,6 +164,42 @@ as0:<provider>:<source-instance>:<source-id-fingerprint>
 
 `as0` プレフィックスとソースフィンガープリントの `v0` ドメイン区切り文字は、`schema_version` とは独立してバージョン管理する。\
 公開レスポンススキーマが `v2` に達したというだけで、これらを変更することはない。
+
+### 種別、関係、メタデータ
+
+各メタデータエントリには、トークン値の `name` と安全な文字列 `value` が必要である。\
+メタデータ名によって、プロバイダー固有の値にプロバイダーに依存しない意味を与えてはならない。
+
+各関係には `kind` と `source_ref` が必要である。\
+現在出力する関係種別は `parent` と `forked_from` で、どちらも明示されたプロバイダー所有の識別フィールドだけに基づく。\
+安全に識別できない関係は、パスやイベント順から導出せず、アダプターが省略する。
+
+ソースの `kind` は拡張可能なトークンである。\
+現在出力する値は、Codex と Claude Code の記録では `session`、ChatGPT Data Export の会話では `conversation` である。\
+利用者は、ソースが認識していない `kind` トークンを使っているというだけで、その他は有効な `v2` レスポンスを拒否してはならない。
+
+### バージョンヒント
+
+存在する場合、`version_hint` には `kind` と `value` が必要で、`kind` も拡張可能である。\
+継承履歴のない Codex ソースと Claude Code は安価な変更検出のために `stat_hash` を出力する。\
+継承履歴を安全に解決できた Codex ソースは、採用したロールアウトの範囲に対する `content_hash` を出力する。\
+ChatGPT Data Export はエクスポート ZIP 全体の SHA-256 識別子として `snapshot_hash` を出力する。\
+利用者は認識済みのヒントを変更検出に使ってよく、認識していないヒント種別は無視しなければならない。
+
+### ソースのやり取りの時刻
+
+`last_interaction_at` がある場合、その値は末尾が `Z` の正規化された UTC の RFC 3339 時刻である。\
+一つの論理ソースに記録されたユーザーまたはアシスタントのメッセージ、ツール呼び出し、ツール結果のうち、最も遅い時刻を表す。\
+管理用の行、システム通知、ファイルの更新時刻は含めない。\
+やり取りがない場合や、活動行の時刻の欠落・不正値、やり取りの可能性がある未知の行、プロバイダーの時刻用互換性境界に含まれない版、曖昧な成果物、継承履歴を解決できないことによって最終時刻を安全に確定できない場合、このフィールドはない。\
+その場合は `scope: source` の `source_time_unavailable` を追加し、`list` または `show` を `partial` にする。\
+`count` で影響するソース数をまとめて示す場合がある。\
+ChatGPT Data Export では選択中の会話経路にあるやり取りを対象とし、別の分岐によってこのフィールドは進まない。
+
+#### 最近のソースを選ぶ
+
+一定期間内の対象を選ぶ利用者は、`list` の全ページを取得し、`last_interaction_at` がないソースを時刻が分かる対象から除外し、絶対日時として比較した後、時刻の降順と `identity.source_ref` の昇順で並べる。\
+ソースの時刻が欠けている場合や未取得のページがある場合など、`partial` の一覧からは対象の全件を確定できない。
 
 ## イベント
 
@@ -222,6 +268,10 @@ JSON の整形やオブジェクトの項目順について元のバイト列の
 
 ## 完全性と省略
 
+各省略には、トークン値の `code` と `scope`、安全な人間向けの `message` が必要である。\
+任意の正の整数 `count` は、その省略が表す既知の項目数を示す。\
+これがないことは、影響を受けるプロバイダー値が 0 件であることを意味しない。
+
 | 状態 | 意味 |
 | --- | --- |
 | `complete` | 重要な値が省略、切り詰め、未対応、不明のいずれにもなっていない。 |
@@ -241,6 +291,21 @@ JSON の整形やオブジェクトの項目順について元のバイト列の
 
 現在のカーソルは `v0:` で始まる。\
 このカーソル形式のバージョンは `schema_version` から独立している。
+
+### 次のページを読む
+
+各応答で `schema_version` を検証し、`status` と `omissions` を調べ、利用可能な操作データを読み取る。\
+`list` と `events` では、`page.has_more` が `true` なら、`page.next_cursor` を変更せず同じ操作に渡す。
+
+```sh
+agent-sessions list --provider codex --limit 50 --cursor '<page.next_cursor>'
+agent-sessions events --limit 50 --cursor '<page.next_cursor>' '<source_ref>'
+```
+
+明示したルートや設定も含め、同じソースの選択を保つ。\
+全ページの省略を保持しながら、`has_more` が `false` になるまで取得する。\
+ページを最後まで取得しても、ほかの省略は解消せず、終了コード `0` も完全性の証明にはならない。\
+ページ間のソースの変更と個別に切り詰めた本文は、[内容の扱い](#内容の扱い) を参照する。
 
 ## 構造化エラーと終了コード
 
@@ -281,9 +346,18 @@ JSON の整形やオブジェクトの項目順について元のバイト列の
 {
   "schema_version": "v1",
   "sources": [
-    {"id": "example-default", "provider": "example", "root": "/fictional/root"}
+    {"id": "codex-one", "provider": "codex", "root": "/fictional/codex-one"},
+    {"id": "codex-two", "provider": "codex", "root": "/fictional/codex-two"}
   ]
 }
+```
+
+この例は、独立した二つの Codex ホームを設定するためのものである。\
+`root` を実際の絶対パスに置き換える。\
+`id` は安定した名前を選び、変更するとソース参照も変わる。
+
+```sh
+agent-sessions list --provider codex --source-instance codex-one
 ```
 
 プロバイダー ID とソースインスタンス ID は `[a-z][a-z0-9-]{0,62}` に一致する。\

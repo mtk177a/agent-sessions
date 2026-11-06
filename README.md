@@ -170,7 +170,7 @@ If your integration uses v1, read [Migration from v1](docs/cli-json-contract.md#
   The tool does not save a transcript archive.\
   It cannot restore records that a provider has changed or deleted.
 
-See [content handling](docs/cli-json-contract.md#content-handling) and [read-only access](docs/architecture.md#read-only-access-and-resource-behavior) for details.
+See [content handling](docs/cli-json-contract.md#content-handling) and [read-only access](docs/architecture.md#read-only-access-and-resource-management) for details.
 
 ## Development
 

@@ -1,17 +1,52 @@
 # Claude Code provider
 
+Use this document to select a Claude Code configuration root and check transcript support.\
+The maintainer sections describe identity, normalization, and compatibility evidence; the [CLI reference](cli-json-contract.md) defines the common `v2` JSON fields.
+
 The `claude` provider adapter reads Claude Code session records directly from a Claude Code configuration root without starting Claude Code.
 
-It maps the compatibility boundary below into the provider-neutral stable `v2` CLI contract.\
-The transcript JSONL format remains adapter-internal and is not part of that public schema.
-
-## Discovery boundary
+## Select a Claude Code root
 
 Claude Code uses `~/.claude` as its default configuration directory and supports overriding that directory with `CLAUDE_CONFIG_DIR`.\
 Main session transcripts are stored at `projects/<project>/<session-id>.jsonl` below that root.
 
 An explicit `--root` or configured source root identifies the Claude Code configuration root, not a project directory or transcript.\
 Source resolution follows the common precedence of explicit root, configured source instance, `CLAUDE_CONFIG_DIR`, and the documented default root.
+
+```sh
+agent-sessions list --provider claude --root /fictional/claude-root
+```
+
+For a nonstandard root, pass it to later source operations or configure a named instance; see [configuration](cli-json-contract.md#configuration).
+
+## Supported records and limitations
+
+Event decoding and format verification are scoped to verified internal transcript JSONL structures for Claude Code `2.1.177`, `2.1.228`, and `2.1.260`.\
+Claude Code documents the transcript location but states that each line's internal shape can change between releases, so other versions remain incomplete for `events` and `verify` rather than being accepted speculatively.
+
+For `list` and `show`, interaction-time decoding also accepts syntactically valid versions at or after `2.1.260` when every row retains a known structure.\
+This has no version ceiling and does not extend verified `events` or `verify` support.\
+Unknown potentially interactive rows or unusable timestamps prevent a source time.
+
+### Subagent records
+
+Subagent artifacts are recognized but are not exposed as independent sources.\
+Only the main transcript contributes verification evidence for a main source.
+
+### Incomplete observations and input limits
+
+Safe and fully represented observations return `complete`.\
+Useful observations with omissions return `partial`; a recognized source with no safely useful observation returns `unsupported`; I/O, containment, replacement-race, or resource failures return `error`.
+
+Artifacts are limited to 64 MiB, identity prefixes, JSONL rows, and sidecars to 1 MiB, discovered files to 100,000, and normalized events to 100,000.\
+These provider-input bounds are in addition to the public response and pagination bounds.
+
+## Adapter behavior for maintainers
+
+Internal JSONL shapes are version-sensitive inputs, not stable public fields.\
+Apply the common [adapter maintenance constraints](architecture.md#maintaining-provider-adapters) when changing these rules.
+
+### Discovery, identity, and content versions
 
 The adapter walks `projects` deterministically.\
 It accepts only bounded regular files contained by the provider root, rejects symlinks and special files, and rechecks file and root identity when opening content.
@@ -25,17 +60,7 @@ If more than one artifact contains the same provider-native session identity, th
 The list version hint is a domain-separated hash of the artifact count, sizes, and modification times.\
 Verification hashes the bounded main transcript through the common `VerifiedVersion` contract using the path-free evidence name `transcript/primary.jsonl`.
 
-## Version-sensitive decoding
-
-Event decoding and format verification are scoped to verified internal transcript JSONL structures for Claude Code `2.1.177`, `2.1.228`, and `2.1.260`.\
-Claude Code documents the transcript location but states that each line's internal shape can change between releases, so other versions remain incomplete for `events` and `verify` rather than being accepted speculatively.
-
-Compatibility for `2.1.228` was checked against its official Claude Code distribution and the documented transcript, hook, status-line, and subagent location contracts.\
-Compatibility for `2.1.177` was checked read-only against private provider-owned records and is covered by independently constructed synthetic fixtures.\
-Only structural properties were inspected, and no private contents or identifiers were copied into this repository.
-
-The `2.1.260` row-writing structures were inspected in the signed official distribution without running it or using real transcripts as fixtures.\
-This does not verify every possible row shape; unknown rows and blocks still prevent `complete`.
+### Messages and omitted content
 
 The adapter accepts `user`, `assistant`, `system`, and `attachment` rows at the verified version.\
 It normalizes public user and assistant text, `tool_use` calls, explicitly correlated `tool_result` blocks, and explicit provider API errors.
@@ -43,13 +68,7 @@ It normalizes public user and assistant text, `tool_use` calls, explicitly corre
 Known bookkeeping rows are not public observations and are ignored.\
 Unknown rows, unknown content blocks, attachments, reasoning blocks, internal user metadata, and unsupported system observations are reported as omissions.
 
-The latest timestamp of supported user and assistant message or tool rows becomes `last_interaction_at`.\
-For interaction time, syntactically valid versions at or after `2.1.260` are also accepted when every row retains a known structure; this forward-compatible boundary has no version ceiling.\
-The observed `agent_listing_delta`, `command_permissions`, `deferred_tools_delta`, `diagnostics`, `edited_text_file`, `opened_file_in_ide`, `plan_mode`, `plan_mode_exit`, `selected_lines_in_ide`, `skill_listing`, and `task_reminder` attachments, and `away_summary` and `informational` system rows, are structurally recognized non-interaction observations and do not advance it.\
-Other attachments, including a possible queued command, remain uncertain and prevent a source time.\
-Bookkeeping, supported non-interaction system rows, and provider API errors do not advance it.\
-Missing or invalid timestamps, unknown potentially interactive rows or blocks, malformed or older unverified versions, and ambiguous transcripts prevent a source time.\
-Forward-compatible interaction-time decoding does not expand the versions considered verified for `events` or `verify`.
+### Tool calls, results, and event timestamps
 
 Tool call identifiers are deterministic adapter-owned hashes of the session identity and provider correlation identifier.\
 Results are related to calls only through the explicit `tool_use_id` value.
@@ -68,7 +87,17 @@ Each entire input or result is bounded to 64 KiB without automatic content redac
 
 Events use their transcript row's timestamp, so events from one row share `recorded_at`.
 
-## Subagents and sidecars
+### Interaction-time classification
+
+The latest timestamp of supported user and assistant message or tool rows becomes `last_interaction_at`.\
+For interaction time, syntactically valid versions at or after `2.1.260` are also accepted when every row retains a known structure; this forward-compatible boundary has no version ceiling.\
+The observed `agent_listing_delta`, `command_permissions`, `deferred_tools_delta`, `diagnostics`, `edited_text_file`, `opened_file_in_ide`, `plan_mode`, `plan_mode_exit`, `selected_lines_in_ide`, `skill_listing`, and `task_reminder` attachments, and `away_summary` and `informational` system rows, are structurally recognized non-interaction observations and do not advance it.\
+Other attachments, including a possible queued command, remain uncertain and prevent a source time.\
+Bookkeeping, supported non-interaction system rows, and provider API errors do not advance it.\
+Missing or invalid timestamps, unknown potentially interactive rows or blocks, malformed or older unverified versions, and ambiguous transcripts prevent a source time.\
+Forward-compatible interaction-time decoding does not expand the versions considered verified for `events` or `verify`.
+
+### Subagent locations and sidecars
 
 Claude Code documents subagent transcripts at `projects/<project>/<session-id>/subagents/agent-<agent-id>.jsonl`.\
 The current distribution also writes adjacent metadata sidecars for these artifacts.
@@ -82,21 +111,16 @@ The verified transcript and sidecar records do not provide an independent provid
 The main transcript is the only verification evidence for a main source.\
 Subagent transcripts and sidecars therefore do not silently change a main source's verified content version.
 
-## Completeness and bounds
+## Compatibility evidence
 
-Safe and fully represented observations return `complete`.\
-Useful observations with omissions return `partial`; a recognized source with no safely useful observation returns `unsupported`; I/O, containment, replacement-race, or resource failures return `error`.
+Compatibility for `2.1.228` was checked against its official Claude Code distribution and the documented transcript, hook, status-line, and subagent location contracts.\
+Compatibility for `2.1.177` was checked read-only against private provider-owned records and is covered by independently constructed synthetic fixtures.\
+Only structural properties were inspected, and no private contents or identifiers were copied into this repository.
 
-Artifacts are limited to 64 MiB, identity prefixes, JSONL rows, and sidecars to 1 MiB, discovered files to 100,000, and normalized events to 100,000.\
-These provider-input bounds are in addition to the public response and pagination bounds.
+The `2.1.260` row-writing structures were inspected in the signed official distribution without running it or using real transcripts as fixtures.\
+This does not verify every possible row shape; unknown rows and blocks still prevent `complete`.
 
-Read-only commands create no index, cache, mirror, database, or provider application metadata update.\
 Synthetic integration tests compare the provider tree's file set, type and mode, size, modification time, and content hash before and after representative `list`, `show`, `events`, and `verify` operations.
-
-The host file system may update access-time metadata when transcript files are read.\
-Lifecycle hooks, status-line integration, session resume, Agent SDK access, `/export`, `/insights`, synchronization, and background ingestion are not discovery or correctness dependencies.
-
-## Public location evidence
 
 - [Sessions](https://code.claude.com/docs/en/sessions) documents transcript persistence and the `projects/<project>/<session-id>.jsonl` location.
 - [Environment variables](https://code.claude.com/docs/en/env-vars) documents `CLAUDE_CONFIG_DIR` and the default configuration directory behavior.

@@ -1,19 +1,39 @@
 # ChatGPT Data Export provider
 
-Use this document for the `chatgpt` adapter to select an existing ChatGPT Data Export ZIP and understand which conversations and branches it exposes.\
-The maintainer sections describe archive decoding and compatibility evidence; the [CLI reference](cli-json-contract.md) defines the common `v2` JSON fields.
+Use this document to read a saved ChatGPT Data Export ZIP with the `chatgpt` adapter and understand its output.\
+For common `v2` JSON fields, see the [CLI reference](cli-json-contract.md).
 
-## Select an export ZIP
+## Usage procedure
 
-Request an export through ChatGPT **Settings → Data Controls → Export Data** or through OpenAI's Privacy Portal, then download it within the availability period described by OpenAI.
+### 1. Prepare an export ZIP
 
-`agent-sessions` does not request, poll, discover, or download exports.\
-Each archive must be selected as a named source instance by using `--provider chatgpt` with `--root`, or by adding an explicit configuration entry:
+Request and download an export before using the adapter.\
+Follow OpenAI's [export instructions](https://help.openai.com/en/articles/7260999-how-do-i-export-my-data) for ChatGPT settings or the Privacy Portal, and download within the stated availability period.\
+`agent-sessions` does not request, poll for, discover, or download exports.
+
+<a id="select-an-export-zip"></a>
+<a id="export-zip-selection"></a>
+
+### 2. Select the export ZIP
+
+Select each archive as a named source instance.\
+The root is the exact ZIP file, not its directory.\
+This provider has no environment variable or default root.
+
+Choose one of the following methods to select the ZIP and list its conversations.
+
+#### Command options
+
+Use `--provider chatgpt`, `--source-instance`, and `--root`:
 
 ```sh
 agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /fictional/chatgpt-export.zip
-agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from list>'
 ```
+
+#### Configuration file
+
+Add an explicit entry in the [configuration file](cli-json-contract.md#configuration).\
+For example:
 
 ```json
 {
@@ -28,30 +48,113 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 }
 ```
 
-The root is the exact ZIP file, not a directory.\
-There is no environment or default root for this provider.
+Then list conversations from the configured instance:
 
-## Conversations, branches, and content
+```sh
+agent-sessions list --provider chatgpt --source-instance chatgpt-personal
+```
 
-`events` returns text and multimodal-text string parts from user and assistant messages on the selected active conversation branch.\
-Other branches are omitted with `non_active_branch`.
+### 3. Read a conversation
 
-Readable tool-role results are also returned, but their call correlation and outcome cannot be established and are reported as omissions.\
-Unknown content and unusable conversation branches also produce explicit incomplete observations.
+Copy `identity.source_ref` for the conversation from the `list` result into the placeholder below.\
+If you selected the ZIP through command options, pass the same `--root` to this and later source operations:
 
-Messages and tool results follow the common bounds without automatic content redaction.\
-Readable string portions are retained, and excluded non-text or unsupported portions are reported.\
-Content can contain secrets; consumers own retention and external sharing.
+```sh
+agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from list>'
+```
 
-### Interaction timestamps
+If you use the configured instance, omit `--root` from this command; the configuration supplies the location.
 
-`list` and `show` expose `last_interaction_at` when the selected conversation branch establishes the latest interaction time.\
-If they cannot establish it, they omit the field and return `partial` with `source_time_unavailable`.\
-Emitted message events separately report their own `create_time` as `recorded_at`; missing or invalid values make `events` partial with `event_time_omitted`.
+<a id="conversations-branches-and-content"></a>
+<a id="supported-records-and-limitations"></a>
 
-## Archive limits
+## Reading the output
 
-The current input bounds are:
+### Returned data
+
+The `data` field contains the information requested by the operation.\
+The following sections describe each kind of returned data.
+
+<a id="support-by-operation"></a>
+
+#### Source information
+
+`list` and `show` return conversation information.\
+They include `last_interaction_at` when the selected branch establishes the latest interaction time.\
+Otherwise, they omit the field and return `partial` with `source_time_unavailable`.
+
+<a id="conversation-branch-limits"></a>
+<a id="returned-content-and-handling"></a>
+
+#### Events
+
+`events` returns supported observations from the selected active conversation branch.\
+Other branches are omitted with `non_active_branch`.\
+An unusable branch produces an explicit incomplete result; the adapter does not invent an order or silently shorten the branch.
+
+Messages and tool results follow the common content bounds.\
+Readable string portions are retained, and excluded non-text or unsupported portions are reported.
+
+##### Messages
+
+The adapter returns text and multimodal-text string parts from user and assistant messages.
+
+##### Tool results
+
+The adapter also returns readable tool-role results.\
+It cannot establish their call correlation or outcome and reports these missing relationships and outcomes as omissions.
+
+#### Verified version
+
+`verify` returns a verified content version that covers the whole ZIP.
+
+<a id="incomplete-results-and-failures"></a>
+
+### Operation status
+
+Use the status fields to identify complete observations, incomplete observations, unsupported input, and failures.
+
+#### Status (`status`)
+
+The returned status has these meanings:
+
+| Status | Meaning |
+| --- | --- |
+| `complete` | The observation is fully represented. |
+| `partial` | Useful information remains, but some information is omitted. |
+| `unsupported` | The input is recognized, but no safely useful observation can be returned. |
+| `error` | The operation failed; inspect `error` for the cause. |
+
+Unknown content or nodes can leave useful events and return `partial`.\
+If no safely usable event remains after omissions, the observation returns `unsupported`.\
+Recognized but incompatible JSON structures also return `unsupported`, rather than a malformed-input error.
+
+<a id="interaction-timestamps"></a>
+
+#### Omission reasons (`omissions`)
+
+These codes explain provider-specific omissions:
+
+| Code | Condition |
+| --- | --- |
+| `non_active_branch` | Nodes outside the selected branch are omitted. |
+| `unknown_node` | An active node or its content is unknown. |
+| `unsupported_format` | The archive JSON structure or conversation graph is unsupported, including a missing active node or a parent cycle. The affected operation returns `unsupported`. |
+| `source_time_unavailable` | `list` or `show` cannot establish the latest interaction time. They omit `last_interaction_at` and return `partial`. |
+| `event_time_omitted` | The original message's `create_time` is missing or invalid; `events` returns `partial`. |
+
+Tool results also report omissions for their unknown call relationships and outcomes.
+
+#### Failure cause (`error`)
+
+Malformed ZIP data, malformed JSON, duplicate members, unsafe members, source replacement, and resource-limit failures have distinct structured error codes.\
+See the common [error specification](cli-json-contract.md#structured-errors-and-exit-codes) for the error fields and codes.
+
+<a id="archive-limits"></a>
+
+## Input limits
+
+The adapter applies these archive input limits:
 
 | Resource | Bound |
 | --- | ---: |
@@ -65,63 +168,167 @@ The current input bounds are:
 | Active-branch nodes | 100,000 |
 | JSON nesting | 64 levels |
 
-These are archive input limits; the common [response and pagination bounds](cli-json-contract.md#resource-bounds) still apply.\
-The ZIP is read without extracting members to disk.
+The common [response and pagination bounds](cli-json-contract.md#resource-bounds) also apply.
 
-## Adapter behavior for maintainers
+## Output handling
 
-OpenAI documents how users request a Data Export and that the downloaded ZIP contains chat history.\
-OpenAI does not document the archive's conversation JSON graph as a stable API, so every internal member name and field used for normalization remains an adapter-owned compatibility boundary.
+The adapter returns recorded content without automatic redaction.\
+Content can contain secrets.\
+Callers decide what to retain or share externally; see [content safety](cli-json-contract.md#content-safety).
+
+<a id="adapter-behavior-for-maintainers"></a>
+
+## Adapter specification for maintainers
+
+OpenAI documents export acquisition and the presence of chat history in the ZIP.\
+It does not document the internal conversation JSON graph as a stable API.\
+The adapter therefore owns compatibility checks for the internal member names and fields that it uses for normalization.
 
 Apply the common [adapter maintenance constraints](architecture.md#maintaining-provider-adapters) when changing these rules.
 
-### Identity and verification
+<a id="archive-validation"></a>
+<a id="zip-safety-checks"></a>
 
-The archive and its conversations have different identities:
+### Archive reading
 
-- the named source instance identifies the explicitly selected archive boundary;
-- each provider-native conversation ID determines one logical source and `source_ref`;
-- the SHA-256 of the whole ZIP is the `snapshot_hash` version hint shared by conversations in that snapshot;
-- `verify` streams the whole ZIP through the common path-free `archive/export.zip` evidence name and the existing `provider-content-v0` algorithm.
+#### ZIP file checks
 
-Replacing the ZIP with a later export can preserve conversation identity while changing the snapshot and verified version.\
+The adapter opens the configured path as one regular file.\
+It reads the ZIP without extracting members to disk.
+
+#### Archive member reading
+
+**Member checks**
+
+The adapter rejects:
+
+- Absolute, traversal, backslash, and drive-prefixed member paths.
+- Duplicate member names.
+- Encrypted members.
+- Symbolic links and other special member types.
+
+<a id="archive-members-and-conversation-identity"></a>
+<a id="conversation-discovery-and-source-identity"></a>
+
+**Conversation JSON selection**
+
+The decoder reads `conversations.json` and numbered `conversations-*.json` members in deterministic member-name order.
+
+### Source information generation
+
+<a id="identity-and-verification"></a>
+
+#### Identity
+
+The named source instance identifies the explicitly selected archive boundary.\
+Within that instance, each provider-native conversation ID determines one logical source and `source_ref`.
+
+The adapter accepts a consistent `id` or `conversation_id` as the provider-native conversation identity and rejects ambiguous duplicates.\
 Paths and archive member names are locators, not conversation identities.
 
-### Branch traversal and event normalization
+Replacing the ZIP with a later export can preserve conversation identity while changing the snapshot and verified version.
 
-For `events`, the adapter starts at the conversation's current node, follows parent links to the root, reverses that chain, and emits supported observations in chronological order.\
+<a id="version-hints-for-change-detection"></a>
+
+#### Version hint
+
+The SHA-256 of the whole ZIP is the `snapshot_hash` version hint.\
+All conversations in that snapshot share the hint.
+
+<a id="interaction-time-classification"></a>
+<a id="source-interaction-time"></a>
+
+#### Latest interaction time
+
+**Time calculation**
+
+For `last_interaction_at`, the adapter uses `create_time` on recognized `user` and `assistant` text or multimodal-text messages and recognized tool-role results on the same branch.\
+It converts numeric Unix seconds exactly to a UTC timestamp.\
+It uses the latest value, including interactions after a resumed conversation.
+
+**Excluded observations**
+
+The following do not advance `last_interaction_at`:
+
+- Assistant `thoughts` and `reasoning_recap`.
+- Other branches.
+- Conversation `update_time`.
+- ZIP file modification time.
+
+**Unavailable time**
+
+The field remains absent in these cases:
+
+- The branch is invalid.
+- A potentially interactive record is unknown.
+- An interaction time is missing or invalid.
+- There is no interaction.
+
+`list` aggregates the number of affected conversations in one omission.
+
+<a id="event-normalization"></a>
+
+### Event generation
+
+<a id="branch-traversal-and-event-normalization"></a>
+#### Conversation branch selection
+
+For `events`, the adapter selects the active branch in this order:
+
+1. Start at the conversation's current node.
+2. Follow parent links to the root.
+3. Reverse that chain and emit supported observations in chronological order.
+
+Nodes outside the active chain are omitted with `non_active_branch`.
+
+A missing active node, a parent cycle, or an unusable graph returns `unsupported_format`.\
+The adapter does not invent an order or silently shorten the branch.
+
+#### Type-specific conversion
+
+The following sections define the conversion for each supported event type.
+
+Unknown active nodes or content are reported with `unknown_node`.\
+Useful remaining events return `partial`; an observation with no safely usable event returns `unsupported`.
+
+##### Message events
+
 Text and multimodal-text string parts from `user` and `assistant` messages become normalized message events.
 
-Nodes outside the active chain are omitted with `non_active_branch`.\
-Tool-role results retain supported text content as standalone results with `correlation_state: unmatched`, `outcome: unknown`, and corresponding omissions.\
-The accepted shape provides no stable call/result relationship; neither graph parents nor adjacent records imply correlation.\
-Unknown active nodes or content are reported with `unknown_node`; useful remaining events return `partial`, while an observation with no safely usable event returns `unsupported`.\
-A missing active node, a parent cycle, or an unusable graph returns `unsupported_format` rather than inventing an order or silently shortening the branch.
+##### Tool result events
 
-### Archive members and conversation identity
+**Body**
 
-The compatibility decoder reads `conversations.json` and numbered `conversations-*.json` members in deterministic member-name order.\
-It accepts a consistent `id` or `conversation_id` as provider-native conversation identity and rejects ambiguous duplicates.
+Tool-role results retain supported text content as standalone results.
 
-### Interaction-time classification
+**Call relationship**
 
-For `last_interaction_at`, the adapter uses `create_time` on recognized `user` and `assistant` text or multimodal-text messages and recognized tool-role results on that same branch.\
-It converts numeric Unix seconds exactly to a UTC timestamp and uses the latest value, including interactions after a resumed conversation.\
-Assistant `thoughts` and `reasoning_recap`, other branches, conversation `update_time`, and ZIP file modification time do not advance the field.\
-An invalid branch, an unknown potentially interactive record, a missing or invalid interaction time, or no interaction leaves the field absent; `list` aggregates the number of affected conversations in one omission.
+Results use `correlation_state: unmatched`, with a corresponding omission.\
+The accepted structure provides no stable call/result relationship.\
+Neither graph parents nor adjacent records imply correlation.
 
-### Archive validation
+**Outcome**
 
-The adapter opens the configured path as one regular file and does not extract any member.\
-It rejects absolute, traversal, backslash, and drive-prefixed member paths, duplicate member names, encrypted members, symbolic links, and other special member types.
+Results use `outcome: unknown`, with a corresponding omission.
 
-Malformed ZIP data, malformed JSON, duplicate members, unsafe members, source replacement, and resource-limit failures have distinct structured error codes.\
-Recognized but incompatible JSON shapes return `unsupported` instead of being classified as malformed input.
+#### Event timestamp assignment
+
+The adapter sets `recorded_at` from the original message's `create_time`.\
+Missing or invalid values make `events` partial with `event_time_omitted`.
+
+<a id="content-verification"></a>
+
+### Verified-version calculation
+
+`verify` streams the whole ZIP for content verification.\
+Verification uses the path-free evidence name `archive/export.zip` and the common `provider-content-v0` algorithm.
 
 ## Compatibility evidence
 
-- [How do I export my ChatGPT history and data?](https://help.openai.com/en/articles/7260999-how-do-i-export-my-data) documents the export request and download process and states that chat history is included in the ZIP.
-- [How can I view my conversation history in a ChatGPT EDU workspace?](https://help.openai.com/en/articles/20001279) identifies `conversations.json` or numbered conversation JSON files as export history files.
+The following official references describe exports and their conversation files:
+
+- [Exporting your ChatGPT history and data](https://help.openai.com/en/articles/7260999-how-do-i-export-my-data) documents the export request and download process and states that chat history is included in the ZIP.
+- [Exporting data from a ChatGPT Edu workspace](https://help.openai.com/en/articles/20001279) identifies `conversations.json` or numbered conversation JSON files as export history files.
 
 These references establish export acquisition and the presence of conversation history.\
 They do not guarantee the internal JSON graph parsed by this adapter.

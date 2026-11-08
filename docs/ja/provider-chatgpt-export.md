@@ -1,6 +1,6 @@
 # ChatGPT Data Export プロバイダー
 
-> **注記:** [英語版](../chatgpt.md) が正式版である。
+> **注記:** [英語版](../provider-chatgpt-export.md) が正式版である。
 > この日本語版は参考訳である。
 > 内容に差異がある場合は英語版を優先する。
 

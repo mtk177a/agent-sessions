@@ -298,9 +298,9 @@ CLI は、個別のソースを指定するために `source_ref` を使う。\
 
 変更するアダプターに応じて、次の文書を参照する。
 
-- [Codex](codex.md): ホームの指定、継承と切り出し、対応版、正規化、入力上限。
-- [Claude Code](claude.md): 設定ルート、主トランスクリプト、サブエージェントの制限、対応版、正規化。
-- [ChatGPT Data Export](chatgpt.md): 明示的な ZIP 指定、アクティブな分岐、スナップショットの識別、アーカイブ上限。
+- [Codex](provider-codex.md): ホームの指定、継承と切り出し、対応版、正規化、入力上限。
+- [Claude Code](provider-claude-code.md): 設定ルート、主トランスクリプト、サブエージェントの制限、対応版、正規化。
+- [ChatGPT Data Export](provider-chatgpt-export.md): 明示的な ZIP 指定、アクティブな分岐、スナップショットの識別、アーカイブ上限。
 
 ### 変更後の検証
 

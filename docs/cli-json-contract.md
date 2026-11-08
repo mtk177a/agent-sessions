@@ -2,7 +2,7 @@
 
 Use this reference when writing scripts that call `agent-sessions` or interpret its JSON output.\
 For installation and a first read, start with the [README](../README.md).\
-Provider-specific roots, accepted formats, and input limits are documented for [Codex](codex.md), [Claude Code](claude.md), and [ChatGPT Data Export](chatgpt.md).
+Provider-specific roots, accepted formats, and input limits are documented for [Codex](provider-codex.md), [Claude Code](provider-claude-code.md), and [ChatGPT Data Export](provider-chatgpt-export.md).
 
 ## Calling commands
 

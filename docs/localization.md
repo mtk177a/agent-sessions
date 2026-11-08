@@ -11,10 +11,10 @@ If a Japanese reference differs from its English source, the English version pre
 | `README.md` | `README.ja.md` |
 | `AGENTS.md` | `AGENTS-ja.md` |
 | `docs/architecture.md` | `docs/ja/architecture.md` |
-| `docs/chatgpt.md` | `docs/ja/chatgpt.md` |
-| `docs/claude.md` | `docs/ja/claude.md` |
+| `docs/provider-chatgpt-export.md` | `docs/ja/provider-chatgpt-export.md` |
+| `docs/provider-claude-code.md` | `docs/ja/provider-claude-code.md` |
 | `docs/cli-json-contract.md` | `docs/ja/cli-json-contract.md` |
-| `docs/codex.md` | `docs/ja/codex.md` |
+| `docs/provider-codex.md` | `docs/ja/provider-codex.md` |
 | `docs/localization.md` | `docs/ja/localization.md` |
 | `.agents/skills/maintain-japanese-references/SKILL.md` | `.agents/skills/maintain-japanese-references/SKILL-ja.md` |
 

@@ -75,9 +75,9 @@ The location to use with `--root` depends on the provider:
 
 | Provider | `--root` selects | Setup, supported formats, and limitations |
 | --- | --- | --- |
-| `codex` | A Codex home | [Codex](docs/codex.md) |
-| `claude` | A Claude Code configuration root | [Claude Code](docs/claude.md) |
-| `chatgpt` | One Data Export ZIP | [ChatGPT Data Export](docs/chatgpt.md) |
+| `codex` | A Codex home | [Codex](docs/provider-codex.md) |
+| `claude` | A Claude Code configuration root | [Claude Code](docs/provider-claude-code.md) |
+| `chatgpt` | One Data Export ZIP | [ChatGPT Data Export](docs/provider-chatgpt-export.md) |
 
 Codex and Claude Code can use provider environment variables or default homes without an `agent-sessions` configuration file.\
 The following commands list records from these locations:

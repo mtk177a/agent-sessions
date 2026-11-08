@@ -77,9 +77,9 @@ agent-sessions events '<source_ref from list>'
 
 | プロバイダー | `--root` で指定するもの | 設定、対応形式、制限 |
 | --- | --- | --- |
-| `codex` | Codex ホーム | [Codex](docs/ja/codex.md) |
-| `claude` | Claude Code の設定ルート | [Claude Code](docs/ja/claude.md) |
-| `chatgpt` | 一つの Data Export ZIP | [ChatGPT Data Export](docs/ja/chatgpt.md) |
+| `codex` | Codex ホーム | [Codex](docs/ja/provider-codex.md) |
+| `claude` | Claude Code の設定ルート | [Claude Code](docs/ja/provider-claude-code.md) |
+| `chatgpt` | 一つの Data Export ZIP | [ChatGPT Data Export](docs/ja/provider-chatgpt-export.md) |
 
 Codex と Claude Code は、`agent-sessions` の設定ファイルがなくても、プロバイダーの環境変数や既定のホームを使える。\
 次のコマンドで、これらの場所にある記録を一覧にできる。

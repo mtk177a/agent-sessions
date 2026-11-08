@@ -294,9 +294,9 @@ Do not commit private session contents or machine-specific information.
 
 Use the provider document for the adapter being changed:
 
-- [Codex](codex.md): home selection, inherited and sliced history, accepted versions, normalization, and input limits.
-- [Claude Code](claude.md): configuration root, main transcripts, subagent limitations, accepted versions, and normalization.
-- [ChatGPT Data Export](chatgpt.md): explicit ZIP selection, active branches, snapshot identity, and archive bounds.
+- [Codex](provider-codex.md): home selection, inherited and sliced history, accepted versions, normalization, and input limits.
+- [Claude Code](provider-claude-code.md): configuration root, main transcripts, subagent limitations, accepted versions, and normalization.
+- [ChatGPT Data Export](provider-chatgpt-export.md): explicit ZIP selection, active branches, snapshot identity, and archive bounds.
 
 ### Validation after changes
 

@@ -6,7 +6,7 @@
 
 この文書は、`agent-sessions` を呼び出すスクリプトや、JSON 出力を解釈する処理を実装するときに使う。\
 インストールと最初の読み取りは [README](../../README.ja.md) を参照する。\
-プロバイダー固有のルート、対応形式、入力上限は、[Codex](codex.md)、[Claude Code](claude.md)、[ChatGPT Data Export](chatgpt.md) に記載する。
+プロバイダー固有のルート、対応形式、入力上限は、[Codex](provider-codex.md)、[Claude Code](provider-claude-code.md)、[ChatGPT Data Export](provider-chatgpt-export.md) に記載する。
 
 ## コマンドの呼び出し
 

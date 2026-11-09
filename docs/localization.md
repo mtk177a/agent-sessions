@@ -1,10 +1,38 @@
-# Localization
+# Language policy
 
-English is the canonical language for public documentation and repository rules in this repository.\
-The maintained Japanese versions are reference translations for comprehension and review, not independent requirements or sources of authority.\
+Use this policy to choose the language for repository work and maintain Japanese references.
+
+## Languages to use
+
+Use the following languages for each type of content:
+
+| Content | Language rule |
+| --- | --- |
+| Public documentation and repository rules | English is canonical. |
+| Code, identifiers, code comments, CLI help and diagnostics, release notes, and commit-message summaries | English by default. |
+| Maintainer-created Issues and pull requests: titles and `Summary` sections | English. |
+| Maintainer-created Issues and pull requests: remaining body and comments | Japanese by default. English may be used when appropriate. |
+
+For maintainer-created Issues and pull requests, full duplication of the body in both languages is not required.
+
+External contributors are not required to follow the maintainer's Japanese-language default.
+
+## Maintaining Japanese references
+
+### Role of references
+
+The maintained Japanese versions are reference translations for comprehension and review.\
+They do not define independent requirements or authority.\
 If a Japanese reference differs from its English source, the English version prevails.
 
-## Maintained references
+`AGENTS-ja.md` is a reference to `AGENTS.md`.\
+It does not provide separate agent instructions or permissions.
+
+Reference translations do not change the product's published interfaces or runtime behavior.
+
+### Maintained files
+
+The following English/Japanese pairs are maintained:
 
 | Canonical English file | Japanese reference |
 | --- | --- |
@@ -18,26 +46,29 @@ If a Japanese reference differs from its English source, the English version pre
 | `docs/localization.md` | `docs/ja/localization.md` |
 | `.agents/skills/maintain-japanese-references/SKILL.md` | `.agents/skills/maintain-japanese-references/SKILL-ja.md` |
 
-Each reference must identify and link to its English source and state that the English version prevails if the two differ.\
-`AGENTS-ja.md` is a reference to `AGENTS.md`; it does not provide separate agent instructions or permissions.\
 ADRs under `docs/decisions/` are outside the maintained reference set.
 
-## Updating references
+### Required reference notice
 
-When a maintained English file is added or changed, use the repository-local `maintain-japanese-references` Skill to review its Japanese counterpart.\
-If the change affects meaning needed to use the document correctly, create or update the Japanese reference in the same change.\
+Each reference must include the following:
+
+- A link to the corresponding English source.
+- A statement that the English version is canonical.
+- A statement that the English version prevails if the versions differ.
+
+### Update handling
+
+When a maintained English file is added or changed, use the repository-local `maintain-japanese-references` Skill to review its Japanese counterpart.
+
 Meaning includes requirements, scope, exceptions, permissions, prohibitions, procedures, validation, links, and relevant document structure.
 
-If the English change does not affect Japanese meaning, leave the reference unchanged and record the reason in the pull request's Validation or Risks / Follow-up section.\
-Change only the affected pairs; do not rewrite unrelated references.\
-If the English meaning or an established translation is materially ambiguous, report the affected pair and uncertainty instead of guessing.
+Use the review result to choose the action:
 
-## Repository language
+| Review result | Required action |
+| --- | --- |
+| The English change affects meaning needed to use the document correctly. | Create or update the Japanese reference in the same change. |
+| The English change does not affect Japanese meaning. | Leave the reference unchanged. Record the reason in the pull request's Validation or Risks / Follow-up section. |
+| The English meaning or an established translation is materially ambiguous. | Do not guess. Report the affected pair and uncertainty. |
 
-Code, identifiers, code comments, CLI help and diagnostics, release notes, and commit-message summaries remain English by default.\
-The product's published interfaces and runtime behavior are unaffected by reference translations.
-
-Maintainer-created Issue and pull request titles and their `Summary` sections are in English.\
-The remaining body and comments are in Japanese by default, but may be written in English when appropriate.\
-Full duplication of the body in both languages is not required.\
-External contributors are not required to follow the maintainer's Japanese-language default.
+Change only the affected pairs.\
+Do not rewrite unrelated references.

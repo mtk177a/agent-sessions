@@ -131,7 +131,8 @@ agent-sessions events --root /fictional/codex-home '<source_ref from list>'
 
 | 条件 | 状態 |
 | --- | --- |
-| 有用な観測結果を得られる。 | `partial` |
+| 観測した内容を省略なく表現できる。 | `complete` |
+| 省略はあるが、有用な観測結果を得られる。 | `partial` |
 | ソースは認識できるが、安全で有用な結果を得られない。 | `unsupported` |
 | I/O またはリソース処理が失敗する。 | `error` |
 

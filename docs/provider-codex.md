@@ -127,7 +127,8 @@ The returned status depends on what the adapter can safely observe:
 
 | Condition | Status |
 | --- | --- |
-| Useful observations are available. | `partial` |
+| The observation is fully represented, with no omissions. | `complete` |
+| Useful observations are available, but omissions are reported. | `partial` |
 | The source is recognized, but no safe useful result is available. | `unsupported` |
 | I/O or resource processing fails. | `error` |
 

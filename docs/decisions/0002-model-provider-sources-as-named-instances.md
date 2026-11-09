@@ -5,33 +5,41 @@
 
 ## Context
 
-A provider name alone is not sufficient to identify one physical source of coding-agent interaction history.
+### Multiple stores for one provider
 
+A provider name alone is not sufficient to identify one physical source of coding-agent interaction history.\
 One computer may expose multiple independent stores for the same provider.
 
 Examples include:
 
-```text
-WSL Codex
-Windows-native Codex
-another Codex home
-WSL Claude Code
-another Claude Code configuration root
-```
+- Codex in WSL.
+- Windows-native Codex.
+- Another Codex home.
+- Claude Code in WSL.
+- Another Claude Code configuration root.
 
 Independent stores may contain the same provider-native session ID without representing the same source.
 
-Provider storage may also move because of configuration, mount points, environment changes, or operating-system differences.
+### Storage location changes
 
+Provider storage may move because of configuration, mount points, environment changes, or operating-system differences.\
 Using an absolute file system path as logical identity would make one logical store appear to change identity whenever its locator changes.
 
-Hard-coding provider-internal session directories into user configuration would also expose implementation details that should remain inside provider adapters.
+### Dependence on provider internals
 
-At the same time, an ordinary single-store environment should work without explicit configuration.
+Hard-coding provider-internal session directories into user configuration would expose implementation details that should remain inside provider adapters.
+
+### Configuration burden
+
+An ordinary single-store environment should work without explicit configuration.
 
 ## Decision
 
 `agent-sessions` will model each independently addressable provider storage or access boundary as a named source instance.
+
+### Identity model
+
+#### Instance definition
 
 A source instance has at least:
 
@@ -40,13 +48,15 @@ A source instance has at least:
 - an access boundary;
 - a provider-level locator when required.
 
-Examples may include:
+Example instance IDs include:
 
-```text
-codex-wsl
-codex-windows-app
-claude-wsl
-```
+- `codex-wsl`
+- `codex-windows-app`
+- `claude-wsl`
+
+#### Identity rules
+
+A source is identified by its provider, source instance, and provider-native source ID.
 
 The identity rules are:
 
@@ -57,15 +67,12 @@ The identity rules are:
 | Provider-native session ID | Not assumed to be globally unique across instances. |
 | File system path or mount point | A locator only. |
 
-Conceptually:
+### Source configuration
 
-```text
-provider
-source instance
-provider-native source ID
-```
+This ADR does not define the exact configuration syntax or operating-system-specific location.\
+These remain implementation decisions until the first configuration contract is defined.
 
-## Provider-level configuration
+#### Configuration boundary
 
 When a provider exposes a configurable home or equivalent root, user configuration should normally identify that provider-level boundary rather than a provider-internal session subdirectory.
 
@@ -73,53 +80,57 @@ Prefer provider-level concepts over internal paths such as a particular `session
 
 Examples include:
 
-```text
-Codex home
-Claude Code configuration root
-export archive
-```
+- Codex home.
+- Claude Code configuration root.
+- Export archive.
 
 The provider adapter owns knowledge of the provider's internal layout.
 
-## Resolution precedence
+#### Instance selection
+
+- **Single store**
+
+  When no explicit instance is configured, an adapter may resolve one default source from documented provider environment variables and defaults.
+
+  This supports an ordinary command without requiring user configuration:
+
+  ```sh
+  agent-sessions list --provider codex
+  ```
+
+- **Multiple stores**: When multiple independently addressable stores are needed, they should receive explicit stable instance IDs.
+
+#### Configuration precedence
 
 Source configuration is resolved in this order:
 
-```text
-1. explicit CLI option
-2. agent-sessions user configuration
-3. provider environment
-4. provider default
-```
+1. Explicit CLI option.
+2. `agent-sessions` user configuration.
+3. Provider environment.
+4. Provider default.
 
-This allows normal single-store environments to work without configuration while supporting explicit multi-store environments.\
-Machine-specific paths belong in machine-local user configuration, not portable repository files.\
-The exact configuration syntax and operating-system-specific location remain implementation decisions until the first configuration contract is defined.
+This allows normal single-store environments to work without configuration while supporting explicit multi-store environments.
 
-## Access methods
+#### Configuration placement
+
+Machine-specific paths belong in machine-local user configuration, not portable repository files.
+
+### Access methods
+
+#### Relationship to source identity
 
 Logical source identity is separate from the mechanism used to access a source.\
 For example, one Codex instance may be accessed through a documented provider interface while another may require read-only file system access.\
 Changing the access method does not necessarily create a new logical instance if it still refers to the same underlying provider store.
 
+#### Selection conditions
+
 An access method is acceptable only when it preserves the `agent-sessions` read-only contract.\
 A documented provider interface is preferred where suitable, but official status does not override the no-write requirement.
 
-## Automatic default instance
-
-When no explicit instance is configured, an adapter may resolve one default source from documented provider environment variables and defaults.
-
-This supports an ordinary command without requiring user configuration:
-
-```text
-agent-sessions list --provider codex
-```
-
-When multiple independently addressable stores are needed, they should receive explicit stable instance IDs.
-
 ## Consequences
 
-### Positive
+### Benefits
 
 - Multiple stores for one provider can coexist without identity collisions.
 - Windows-native and WSL stores can remain distinct on one physical computer.
@@ -129,7 +140,7 @@ When multiple independently addressable stores are needed, they should receive e
 - Normal single-store environments remain configuration-free.
 - Access strategy can evolve separately from source identity.
 
-### Negative
+### Accepted costs
 
 - Users with multiple stores must maintain stable instance IDs.
 - Renaming an instance is logically significant to downstream consumers unless an explicit migration mechanism exists.
@@ -156,7 +167,7 @@ Rejected as the normal contract.\
 It leaks provider implementation details into user configuration and makes provider layout changes harder to isolate within adapters.\
 Low-level diagnostic overrides may exist later without defining the normal model.
 
-### Generate opaque identifiers from paths
+### Use path hashes as identities
 
 Rejected.\
 Hashing a locator hides the path but retains the same identity instability: a path change would still create a new logical identity.

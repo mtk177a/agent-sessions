@@ -1,32 +1,123 @@
-# maintain-japanese-references evaluation
+# Evaluate maintain-japanese-references
 
-## Provenance and purpose
+Use this procedure after you change the Skill to check translation decisions and responses to requests outside its scope.
 
-This repository-local Skill adapts the responsibility and boundary of [`mtk177a/skills`' `maintain-japanese-references`](https://github.com/mtk177a/skills/tree/b32b606de2650d140d000150bb67a66f70de521e/.agents/skills/maintain-japanese-references) (MIT, revision `b32b606de2650d140d000150bb67a66f70de521e`).\
-The adapted artifact uses this repository's fixed nine pairs and its `docs/localization.md` policy.\
-Only the upstream `SKILL.md` and its `evals/README.md` informed the adaptation; no upstream scripts, assets, or executable material were copied.
+## Evaluation procedure
 
-The cases below test translation decisions and routing.\
-Use independently constructed fictional text, never real session data or private material.\
-For each case, give a blank-context executor only the candidate `SKILL.md`, the request, and the listed fixture content.\
-Keep the expected results below out of the executor input.\
-A separate reviewer compares output and any edits with the canonical text and expected result; an executor's self-report alone is not a pass.
+### 1. Check the Skill text
 
-## Cases
+Examine [SKILL.md](../SKILL.md) for these items:
 
-| Case | Executor input | Expected result and grading |
-| --- | --- | --- |
-| A: meaning changes | An in-scope English paragraph changes `should` to `must` and narrows an exception; provide its existing Japanese reference. Ask to maintain the pair. | The Japanese reference preserves both changes, adds no rule, and the report names the reason. Compare both passages and the diff. |
-| B: meaning stays the same | An in-scope English file changes only source-line wrapping; provide an aligned Japanese reference. | The Japanese file remains byte-for-byte unchanged and the report explains why. Inspect the diff and report. |
-| C: invented meaning | An in-scope English paragraph describes an optional verification step; provide a Japanese draft that makes it mandatory and adds a new example. Ask to align the pair. | The mandatory wording and extra example are removed or corrected, with no English-source edit. Compare claims sentence by sentence. |
-| D: ambiguity | An in-scope English term has two materially different possible meanings and no disambiguating context; provide its Japanese reference. | The executor identifies the affected pair and uncertainty rather than choosing one meaning, while completing independent work if supplied. Inspect the report and edits. |
-| E: unrelated pair | Provide a meaningful change to one maintained English file, its Japanese counterpart, and an unrelated maintained pair. | Only the affected Japanese counterpart changes. Inspect the complete diff and report. |
-| F: tracker request | Ask for an Issue or pull request body with no changed maintained English file. | The Skill does not author, translate, or edit tracker content or repository files under its translation workflow. Inspect output and diff. |
+- Valid frontmatter.
+- A scope limited to the [maintained pairs](../../../../docs/localization.md#maintained-files).
+- An instruction to include the required English-source notice in Japanese references.
+- Instructions for ambiguous meaning.
+- Exclusion of ADRs, tracker writing, general translation, and English-source edits.
 
-## Procedure and acceptance
+### 2. Prepare the inputs
 
-Run a static check of frontmatter, the nine-pair boundary, canonical-source notice requirement, ambiguity handling, and scope exclusions.\
-Then run cases A–F once in isolated executor contexts, with a separate reviewer applying the stated grading.\
-An incorrect translation, invented requirement, unrequested file edit, or responsibility-boundary violation fails acceptance.\
-Correct the Skill or a defective case and rerun only affected cases; repeat or compare models only when results are ambiguous or unstable.\
-Record actual prompts, outputs, diffs, reviewer findings, and unexecuted cases in the implementation report rather than treating this document as proof that a case passed.
+Use independently constructed fictional text, never real session data or private material.
+
+For each case, give the executor only:
+
+- The candidate `SKILL.md`.
+
+- The request and fixtures described under **Input**.
+
+- These sections of `docs/localization.md`, with their source path:
+  - [Maintained files](../../../../docs/localization.md#maintained-files).
+  - [Required reference notice](../../../../docs/localization.md#required-reference-notice).
+  - [Update handling](../../../../docs/localization.md#update-handling).
+
+Keep the expected results out of the executor's input.
+
+### 3. Run the cases
+
+Run cases A–F once each.\
+Start each executor with no prior conversation context.
+
+### 4. Judge the results
+
+A separate reviewer must compare the output, complete diff, and English source with each expected result.\
+The executor's report alone does not establish a pass.
+
+Fail the evaluation for an incorrect translation, invented requirement, unrequested file edit, or action outside the Skill's scope.
+
+Correct the Skill or a defective case, then rerun only affected cases.\
+Repeat runs or compare models only when results are ambiguous or unstable.
+
+### 5. Record the results
+
+In the implementation report, record:
+
+- Actual prompts and outputs.
+- Diffs and reviewer findings.
+- Cases not run.
+
+This procedure is not evidence that a case passed.
+
+## Evaluation cases
+
+### A. English meaning changes
+
+- **Input**
+
+  An in-scope English paragraph changes `should` to `must` and narrows an exception.\
+  Supply its existing Japanese reference and ask the executor to maintain the pair.
+
+- **Expected result**
+
+  The Japanese reference preserves both changes and adds no rule.\
+  The report explains the reason for the update.
+
+### B. English meaning stays the same
+
+- **Input**
+
+  An in-scope English file changes only source-line wrapping.\
+  Supply a Japanese reference with the same meaning.
+
+- **Expected result**
+
+  The Japanese file stays byte-for-byte unchanged.\
+  The report explains why.
+
+### C. The Japanese draft adds meaning
+
+- **Input**
+
+  An in-scope English paragraph describes an optional verification step.\
+  The Japanese draft makes it mandatory and adds an example.\
+  Ask the executor to align the pair.
+
+- **Expected result**
+
+  The mandatory wording and extra example are removed or corrected.\
+  The English source stays unchanged.
+
+### D. English meaning is ambiguous
+
+- **Input**
+
+  An in-scope English term has two materially different possible meanings and no context that distinguishes them.\
+  Supply its Japanese reference.
+
+- **Expected result**
+
+  The executor reports the affected pair and uncertainty instead of choosing one meaning.\
+  It completes independent work if supplied.
+
+### E. An unrelated pair is included
+
+- **Input**: Supply a meaningful change to one maintained English file, its Japanese reference, and an unrelated maintained pair.
+- **Expected result**: The executor changes only the affected Japanese reference.
+
+### F. The request asks for tracker content
+
+- **Input**: Ask for an Issue or pull request body with no changed maintained English file.
+- **Expected result**: In this workflow, the executor does not write, translate, or edit tracker content or change repository files.
+
+## Source
+
+This Skill adapts [maintain-japanese-references from mtk177a/skills](https://github.com/mtk177a/skills/tree/b32b606de2650d140d000150bb67a66f70de521e/.agents/skills/maintain-japanese-references) (MIT, revision `b32b606de2650d140d000150bb67a66f70de521e`).\
+Only its `SKILL.md` and `evals/README.md` informed the adaptation.

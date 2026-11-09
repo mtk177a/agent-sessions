@@ -5,48 +5,75 @@
 
 ## Context
 
-The initial provider-neutral CLI needs stable discovery boundaries without promoting provider-owned transcript formats into the public contract.
+### Limits of discovery
 
-Provider documentation identifies storage roots, transcript locations, or export acquisition, but the JSONL rows and archive JSON graphs are version-sensitive implementation details.\
-Starting a provider service or depending on a lifecycle hook would also add behavior that is unnecessary for read-only discovery.
+The initial provider-neutral CLI needs stable discovery boundaries without making provider-owned transcript formats part of the public contract.
+
+Provider documentation identifies storage roots, transcript locations, or how to obtain an export.\
+The JSONL rows and conversation JSON graphs in archives are implementation details that can change between versions.\
+Finding a record does not establish that the adapter can decode its format.
+
+### Unnecessary dependencies
+
+Starting a provider service or depending on a lifecycle hook would add behavior that read-only discovery does not need.
 
 ## Decision
 
 Provider adapters will separate documented location and lifecycle facts from version-sensitive artifact decoding.
 
-For Codex:
+### Common principles
 
-- the documented provider home is the discovery root;
-- `sessions` and `archived_sessions` under that home are the transcript discovery locations;
-- the Codex App Server is not used as a read-only inspection path;
-- transcript JSONL shapes remain an adapter-scoped compatibility boundary.
+#### Record format support
 
-For Claude Code:
+- Provider-specific rows are normalized only inside the owning adapter.
+- Adapters must maintain explicit compatibility logic and synthetic tests for every provider shape they accept.
+- Unknown artifact shapes fail closed as `partial`, `unsupported`, or `error` rather than being silently accepted as complete.
 
-- the documented configuration root is the discovery root;
-- the documented project transcript location under that root is the transcript discovery boundary;
-- transcript JSONL shapes remain an adapter-scoped compatibility boundary.
+#### Independence from lifecycle hooks
 
-For ChatGPT Data Export:
+`SessionEnd` and other lifecycle hooks are not dependencies of initial discovery or correctness.
 
-- the user-requested export ZIP is an explicit named source instance and is never auto-discovered or downloaded;
-- the publicly documented export acquisition path establishes compatibility with the source type;
-- conversation JSON graph shapes within the ZIP remain an adapter-scoped compatibility boundary rather than a stable OpenAI API;
-- the archive snapshot identity remains distinct from each provider-native conversation identity.
+### Provider-specific rules
 
-For all providers:
+#### Codex
 
-- unknown artifact shapes fail closed as `partial`, `unsupported`, or `error` rather than being silently accepted as complete;
-- provider-specific rows are normalized only inside the owning adapter;
-- `SessionEnd` and other lifecycle hooks are not dependencies of initial discovery or correctness.
+- **Discovery locations**
+
+  The documented provider home is the discovery root.\
+  `sessions` and `archived_sessions` under that home are the transcript discovery locations.
+
+- **Read interface**: The Codex App Server is not used as a read-only inspection path.
+
+- **Record format**: Transcript JSONL shapes remain an adapter-scoped compatibility boundary.
+
+#### Claude Code
+
+- **Discovery locations**
+
+  The documented configuration root is the discovery root.\
+  The documented project transcript location under that root is the transcript discovery boundary.
+
+- **Record format**: Transcript JSONL shapes remain an adapter-scoped compatibility boundary.
+
+#### ChatGPT Data Export
+
+- **Input selection**: The user-requested export ZIP is an explicit named source instance and is never auto-discovered or downloaded.
+- **Export acquisition**: The publicly documented export acquisition path establishes compatibility with the source type.
+- **Record format**: Conversation JSON graph shapes within the ZIP remain an adapter-scoped compatibility boundary rather than a stable OpenAI API.
+- **Identity**: The archive snapshot identity remains distinct from each provider-native conversation identity.
 
 ## Consequences
 
-Documented root and transcript-location changes can be handled separately from row-decoding changes.\
-The public schema does not inherit unstable provider JSONL fields, and read-only commands do not need to start provider services or install hooks.
+### Benefits
 
-Adapters must maintain explicit compatibility logic and synthetic tests for every provider shape they accept.\
-An unknown shape may reduce completeness even when some safe information can still be returned.
+- Documented root and transcript-location changes can be handled separately from row-decoding changes.
+- The public schema does not inherit unstable provider JSONL fields.
+- Read-only commands do not need to start provider services or install hooks.
+
+### Accepted costs
+
+- Each supported provider format requires maintenance of compatibility logic and synthetic tests.
+- An unknown shape may reduce completeness even when some safe information can still be returned.
 
 ## References
 

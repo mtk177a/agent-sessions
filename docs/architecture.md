@@ -1,592 +1,339 @@
 # Architecture
 
-## Purpose
+This document explains the structure of `agent-sessions` and the constraints maintainers must preserve.\
+For command syntax and JSON fields, use the [CLI JSON reference](cli-json-contract.md).\
+For accepted provider formats, use the [provider documents](#provider-compatibility-maintenance).
 
-`agent-sessions` provides a provider-neutral, read-only access layer over coding-agent interaction records.
+## Overall structure
 
-Its responsibilities are limited to:
+### Responsibilities
 
-- source discovery;
-- provider access;
-- identity;
-- source-version observation;
-- normalization;
-- bounded output;
-- completeness reporting;
-- verification.
+Callers include scripts and applications that use the CLI.\
+The provider, `agent-sessions`, and caller divide the work as follows:
 
-It does not own the interpretation that downstream consumers assign to those records.
-
-## System boundary
-
-```text
-Provider-owned interaction records
-────────────────────────────────────────────
-
-Codex
-├── persisted thread/session data
-└── supported read interfaces
-
-Claude Code
-└── persisted session transcripts
-
-ChatGPT
-└── user-requested Data Export ZIP
-
-                    │
-                    ▼
-
-agent-sessions
-────────────────────────────────────────────
-
-source discovery
-provider adapters
-logical identity
-version observation
-normalization
-bounded output
-completeness
-verification
-
-                    │
-                    ▼
-
-Downstream consumers
-────────────────────────────────────────────
-
-harness retrospective
-domain-specific integration
-other local tooling
-```
-
-| Actor | Owns |
+| Participant | Responsibility |
 | --- | --- |
-| Provider | Raw interaction record |
-| `agent-sessions` | Normalized access contract |
-| Downstream consumer | Processing and interpretation state |
+| Provider | Keep the original interaction records, which remain the source of truth. |
+| `agent-sessions` | Find records, normalize their contents, and return results within output limits. Provide evidence for content verification. |
+| Caller | Interpret results, decide what to analyze or save, and track its own processing state. |
 
-## Architectural invariants
+**Information managed by callers**
 
-### Read operations are non-mutating
+The caller manages review decisions, findings, proposals, import decisions, and saved evidence.\
+Two callers can independently review the same source version.\
+The access layer does not infer their states or keep those states consistent with each other.
 
-An operation whose purpose is inspection must not modify:
+**Capabilities built by callers**
 
-- provider-owned interaction records;
-- provider-owned application metadata;
-- consumer state;
-- persistent `agent-sessions` application state.
+Domain-specific interpretation, personal memory, and retrospective workflows belong to callers.\
+The access layer does not provide general chat clients, web interfaces, cloud storage or synchronization, or continuous telemetry.\
+Full-text and vector indexes are also outside its responsibilities.\
+A caller can build these capabilities on the read interface.
 
-The adapter does not write those values.\
-The host file system may update access-time metadata when a provider file is read; that file-system side effect is outside the semantic no-write guarantee.
+### Command processing flow
 
-An official provider interface is acceptable only when its concrete behavior preserves this contract for the requested operation.
+The diagram shows how the tool processes a command and returns a JSON response.\
+The arrow from provider records shows the input to the adapter.
 
-### Previous execution is not required for correctness
-
-Given the same source data, configuration, and tool version, a read-only operation must produce the same semantic result regardless of whether `agent-sessions` has previously run.\
-No registry bootstrap or inventory phase is required for source correctness.
-
-### Raw interaction history is not duplicated
-
-`agent-sessions` does not persist complete copies of provider transcripts.\
-A downstream consumer that requires durable evidence after provider retention ends owns the retention policy for the minimum evidence it needs.
-
-### Consumer state remains isolated
-
-There is no universal processed-state model.
-
-For the same source version, the following combination is valid:
-
-```text
-consumer A = reviewed
-consumer B = unreviewed
+```mermaid
+flowchart TD
+    command["Command and arguments"] --> resolve["CLI: validate arguments and read configuration"]
+    resolve --> adapter["Provider adapter: read selected records"]
+    records["Provider-owned records"] --> adapter
+    adapter --> response["CLI: validate results and write JSON"]
+    response --> caller["JSON response to the caller"]
 ```
 
-The access layer must not infer or reconcile those states.
+The CLI selects providers and source instances from the arguments and configuration, then calls the adapters.\
+Each adapter finds and reads records for the requested operation, then returns normalized records or evidence for content verification.\
+The CLI validates the result and limits output size.\
+It divides `list` and `events` results into pages.
 
-### Idle activity is zero by default
+### Package structure
 
-The architecture does not require any of the following:
+The following packages implement these responsibilities:
 
-- daemon;
-- file watcher;
-- timer;
-- periodic synchronization job;
-- lifecycle-hook ingestion process.
-
-When no command is running, `agent-sessions` performs no work.
-
-## Domain model
-
-The common model intentionally avoids forcing every provider to use the term `session`.
-
-### Provider
-
-A supported producer of interaction records.
-
-The implemented provider adapters are:
-
-```text
-codex
-claude
-chatgpt
-```
-
-Provider names identify access adapters, not model vendors in the abstract.
-
-### Source instance
-
-A separately addressable provider storage or access boundary.
-
-Examples:
-
-```text
-codex-wsl
-codex-windows-app
-claude-wsl
-```
-
-A source instance has a stable logical ID and belongs to one provider.
-
-Depending on the provider, it may also have:
-
-- a provider home;
-- an archive path;
-- an access method;
-- other machine-local locator information.
-
-Locators do not define logical identity.
-
-### Source
-
-One provider-owned interaction record that consumers can address independently.
-
-Typical provider-native forms are:
-
-```text
-Codex       → thread or session
-Claude Code → session
-ChatGPT    → conversation within an export snapshot
-```
-
-A logical source identity includes at least:
-
-```text
-provider
-source instance
-provider-native source ID
-```
-
-The stable `v2` CLI uses a deterministic reference with this form:
-
-```text
-as0:<provider>:<source-instance>:<source-id-fingerprint>
-```
-
-The fingerprint is a domain-separated SHA-256 hash of the provider-native source ID.\
-It avoids embedding the raw ID or a machine-local locator in the command-line reference.
-
-The `as0` prefix and the source fingerprint's `v0` domain separator version their own formats and algorithms.\
-They are independent of the public JSON schema version and remain unchanged while their meanings and algorithms remain unchanged.
-
-A file system location is not source identity.
-
-A provider-controlled move between locations does not by itself create a new logical source when the underlying provider identity remains unchanged.
-
-### Source interaction time
-
-`last_interaction_at` is the latest validated timestamp of a recorded user or assistant message, tool call, or tool result in one logical source.\
-Provider adapters derive it from bounded provider-owned records and normalize it to UTC.\
-Provider metadata, system notifications, and file modification time do not advance it.\
-For ChatGPT Data Export, the selected active conversation branch defines which interactions are considered.
-
-The field is absent when an adapter cannot establish the latest interaction safely.\
-`list` or `show` then reports an omission and is not `complete`; a partial listing cannot establish an exhaustive time cohort.\
-Consumers may collect all `list` pages, apply an absolute cutoff, and sort eligible sources by time descending and `source_ref` ascending without changing the CLI's source-reference pagination order.
-
-### Interaction
-
-The logical conversation or work interaction represented by a source.\
-For the implemented Codex and Claude Code providers, one source maps to one interaction.
-
-### Event
-
-An ordered normalized observation within an interaction.
-
-The common event model represents:
-
-- user messages;
-- assistant messages;
-- tool calls;
-- tool results;
-- errors;
-- source relationships and lifecycle metadata when materially available.
-
-Provider-specific information that cannot be represented safely or faithfully may remain provider metadata or be reported as omitted.\
-Normalization must not invent equivalence between provider concepts that are materially different.
-
-## Source identity and source version
-
-Logical identity and observed content version are distinct.\
-A provider-native source may change while retaining the same identity, for example when a session is resumed.
-
-### Version hint
-
-Source listings expose a version hint to indicate whether a source may have changed.\
-Most hints use inexpensive metadata; Codex inherited history hashes the included bytes already scanned for interaction time.
-
-Depending on the provider, useful hints may include:
-
-- provider-reported update time;
-- artifact modification time;
-- artifact size;
-- included source content when its effective history spans multiple artifacts;
-- another stable provider metadata value.
-
-A version hint is an optimization signal.\
-It is not durable cryptographic evidence.
-
-Each provider owns the meaning and independently versioned algorithm namespace of its hints.\
-Codex uses `v0` for current-artifact statistics and `v3` for included inherited or sliced content and the rollout headers needed to interpret it.\
-Changing the public JSON schema version does not change an otherwise identical hint.
-
-### Verified version
-
-When a consumer requires durable provenance, a verification operation may read the necessary source content and return a content hash or equivalent verified version identifier.
-
-A consumer can then retain the following data without requiring `agent-sessions` to retain the review state itself:
-
-```text
-source reference
-verified source version
-consumer-specific decision
-```
-
-The verified-version hash uses its own `v0` domain separator and the `provider-content-v0` basis.\
-Those values are independent from `schema_version` and change only when their hashing meaning or algorithm changes.
-
-### Incremental consumer workflow
-
-A downstream consumer may implement incremental review as follows:
-
-```text
-list sources
-      │
-      ▼
-compare version hints
-with consumer-owned state
-      │
-      ├── unchanged
-      │      └── skip expensive source read
-      │
-      └── possibly changed
-             │
-             ▼
-           verify
-             │
-             ▼
-       read normalized events
-```
-
-Incremental processing therefore does not require a central processed-session database.
-
-## Provider access
-
-Each provider adapter selects the narrowest access path that satisfies the public read contract.
-
-All production adapters implement [ADR 0003](decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md): documented provider roots, transcript locations, or export acquisition paths define discovery, while provider-owned JSON shapes remain version-sensitive decoder inputs inside the adapter.
-
-### Official interfaces and file system access
-
-A documented provider interface is preferred when it provides:
-
-- sufficient source discovery;
-- sufficient source fidelity;
-- bounded access;
-- a non-mutating read path.
-
-Official status alone is not sufficient.
-
-If an official operation performs metadata repair, migration, synchronization, or another persistent mutation, the adapter may select a safer supported access path instead.
-
-File system parsing is an acceptable fallback when needed to preserve the stronger read-only contract.
-
-File-backed adapters open only bounded regular files.\
-Directory-backed adapters recheck the opened file identity, resolved path containment, and provider-root identity; exact-file adapters recheck the selected file identity and content snapshot.\
-Special files and path replacement outside the configured source boundary are rejected.
-
-Provider-internal formats are version-sensitive inputs and are not automatically promoted to public `agent-sessions` contracts.
-
-### Codex
-
-The Codex adapter accepts the documented Codex home and discovers rollout artifacts below its `sessions` and `archived_sessions` locations.\
-It does not start the Codex App Server for read-only inspection.
-
-User configuration identifies the Codex home rather than an internal session directory.
-
-Multiple Codex homes or stores are represented by separate named source instances.
-
-Discovery reads only bounded rollout headers, while `events` and `verify` cross the separately maintained version-sensitive decoding boundary.\
-The accepted artifact and row compatibility evidence, normalization choices, and explicit limitations are documented in [Codex provider](codex.md).
-
-### Claude Code
-
-The Claude Code adapter accepts the documented configuration root and discovers main session transcripts below its `projects` location.\
-It reads provider-owned artifacts directly without starting Claude Code or modifying provider data or metadata.
-
-Multiple independently stored Claude Code roots are represented by separate named source instances.
-
-Provider configuration environment variables and documented defaults may supply the source location when explicit `agent-sessions` configuration is absent.
-
-Discovery uses the documented location contract and obtains logical identity from the transcript's provider-owned `sessionId`, not from its path.\
-The JSONL row and content-block shapes remain a separately maintained version-sensitive decoding boundary.
-
-Documented subagent transcript locations and version-specific metadata sidecars are recognized and validated within the provider root.\
-They are not exposed as independent sources because the verified records do not provide a provider-owned subagent identity that satisfies the common identity contract.
-
-The accepted location evidence, version-specific record compatibility, normalization choices, and limitations are documented in [Claude Code provider](claude.md).
-
-### ChatGPT Data Export
-
-The ChatGPT adapter accepts only an explicitly selected Data Export ZIP.\
-It does not discover archives, request an export, download one, or use a private ChatGPT API.
-
-The named source instance identifies the selected archive boundary, while each conversation in the archive is an independently addressable logical source.\
-Conversation identity comes from the provider-native conversation identity; the archive SHA-256 is a separate snapshot version hint shared by conversations found in the same ZIP.
-
-The adapter reads matching conversation JSON members in memory within explicit archive, member, compression-ratio, nesting, conversation, and event bounds.\
-It never extracts archive members to disk.\
-The active conversation branch is traversed from the current node through parent links, then normalized in chronological order.
-
-OpenAI documents how a user obtains a Data Export and that the archive contains chat history, but it does not publish the internal conversation JSON graph as a stable API.\
-That graph remains an adapter-scoped compatibility boundary documented in [ChatGPT Data Export provider](chatgpt.md).
-
-## Configuration model
-
-Ordinary single-source environments work without a dedicated configuration file.
-
-Explicit configuration exists for:
-
-- multiple stores for one provider;
-- nonstandard provider homes;
-- mounted provider data.
-
-Resolution follows:
-
-```text
-1. explicit CLI option
-2. agent-sessions user configuration
-3. provider environment
-4. provider default
-```
-
-### Provider-level location
-
-Configuration identifies the provider-level storage or access boundary whenever possible.
-
-Prefer provider-level concepts over hard-coded provider-internal paths such as a particular `sessions/` subdirectory.
-
-Examples include:
-
-```text
-Codex home
-Claude Code configuration root
-ChatGPT Data Export ZIP
-```
-
-The adapter owns knowledge of internal layout.
-
-### Machine-local configuration
-
-Source locators may contain machine-specific paths and mount points.\
-They therefore belong in machine-local configuration rather than portable repository files.
-
-The optional `v1` configuration is strict JSON at `agent-sessions/config.json` below the directory returned by `os.UserConfigDir`.\
-It contains named `sources` with `id`, `provider`, and absolute provider-level `root` fields.
-
-### Named source instances
-
-Multiple instances for one provider are valid.
-
-The implemented configuration expresses these concepts as strict JSON:
-
-```json
-{
-  "schema_version": "v1",
-  "sources": [
-    {"id": "codex-one", "provider": "codex", "root": "/fictional/codex-one"},
-    {"id": "codex-two", "provider": "codex", "root": "/fictional/codex-two"}
-  ]
-}
-```
-
-The locators are fictional examples.
-
-## Statelessness and storage
-
-`agent-sessions` is semantically stateless.
-
-The implementation does not require:
-
-- SQLite;
-- another persistent database;
-- a session registry;
-- a transcript mirror;
-- a persistent search index;
-- a background event spool.
-
-This is an architectural choice rather than an implementation shortcut.
-
-### Disposable cache
-
-A cache may be introduced only when realistic measurements show that direct discovery or parsing is materially too expensive.
-
-Any future cache must satisfy all of the following:
-
-- it is not authoritative;
-- it may be deleted without loss of correctness;
-- cache absence changes performance only;
-- unchanged read operations do not cause unnecessary persistent writes;
-- write amplification is measured;
-- idle disk writes remain zero.
-
-Caching remains an implementation detail and is not part of the consumer-facing state model.
-
-## Resource behavior
-
-Disk endurance is a first-class quality attribute.
-
-The default resource contract is:
-
-```text
-idle:
-  background processes = 0
-  persistent writes = 0
-
-read-only command:
-  agent-sessions persistent writes = 0
-
-source access:
-  read only what the requested operation requires
-  avoid complete-history reads when cheaper metadata can narrow the source set
-```
-
-Codex `list` reads bounded effective rollout history, including referenced prefixes, and Claude Code `list` reads bounded main transcripts to establish interaction time.\
-This increases read work but causes no persistent `agent-sessions` writes.
-
-Performance optimization must not introduce periodic whole-history scans merely to reduce interactive latency.\
-Changes that introduce persistent I/O require direct measurement on the affected operating systems and realistic source volumes.
-
-## Completeness
-
-Successful parsing and complete observation are not the same thing.
-
-The public result model must distinguish at least the following states:
-
-| Status | Meaning |
+| Component | Responsibility |
 | --- | --- |
-| `complete` | The adapter satisfied the documented completeness contract for the operation. |
-| `partial` | Useful output was produced, but material source information was unavailable, omitted, truncated, or unsupported. |
-| `unsupported` | The source or operation is recognized, but the adapter cannot safely satisfy the requested contract. |
-| `error` | The operation failed. |
+| [`cmd/agent-sessions`](../cmd/agent-sessions) | Register the production adapters and start the CLI. |
+| [`internal/config`](../internal/config) | Read machine-local configuration and select provider-level roots. |
+| [`internal/provider`](../internal/provider) and its adapters | Find and read records, normalize provider data, and collect verification evidence. |
+| [`internal/cli`](../internal/cli) | Dispatch commands, validate results, enforce output limits, paginate results, and write JSON. |
+| [`internal/contract`](../internal/contract) | Define common response types, source references, content bounds, and version hashing. |
+| [`internal/safeio`](../internal/safeio) | Read files within size limits. Verify that they stay inside the selected root and have not been replaced. |
 
-Bounded output and pagination must be explicit.\
-A truncated result must not silently appear complete.
+## Source model
 
-When `list` combines providers, aggregation is order-independent.\
-All-unsupported observations remain `unsupported`, while usable observations combined with unsupported omissions are `partial`.
-An absent provider environment or default root contributes no sources to combined discovery.\
-Explicit and configured roots remain authoritative and are not silently skipped.
+### Providers and source instances
 
-## Security and privacy
+A provider can have multiple independent stores.\
+The following concepts distinguish them:
 
-Historical interaction records are untrusted data.
+| Concept | Meaning | Example |
+| --- | --- | --- |
+| Provider | The adapter used to access records. | `codex`, `claude`, or `chatgpt` |
+| Source instance | A store or access boundary for one provider. Each instance has a name to distinguish it from others. | `codex-one` and `codex-two` for two Codex homes |
 
-They may contain:
+Here, a provider name identifies a record-reading adapter rather than a model vendor.
 
-- shell commands;
-- tool instructions;
-- prompts;
-- URLs;
-- credentials;
-- generated source code;
-- content claiming to override current instructions.
+### Source identity
 
-The security boundary requires the following:
+A source is one session or conversation within an instance that can be selected separately.\
+Examples are a Codex thread, Claude Code session, and ChatGPT conversation.
 
-- No historical instruction gains authority by appearing in a source record.
-- The access layer must not execute historical content or follow historical instructions.
-- Recorded content is returned without automatic redaction, including credential-like values and paths.
-- Consumers own content selection for analysis, retention, and external sharing.
-- Structured CLI diagnostics do not unnecessarily copy source data.
-- Provider adapters require resource limits for malformed, nested, compressed, oversized, or otherwise adversarial input.
-- Committed tests and fixtures must be synthetic.
-- Real private session data must not be converted into committed fixtures, even after manual redaction.
+#### Logical identity
 
-## Implemented CLI core
+A source is identified by its provider, source instance, and provider-native source ID.\
+A source instance has a stable logical ID and a separate location on the local machine.\
+The location can be a provider home or an export path.\
+A path tells the tool where to read records; it does not identify a logical source.
 
-The provider-neutral Go executable implements the stable `v2` machine-readable contract for the following operations.
+**Identity rules**
 
-The operations are:
+- If the provider, instance, and native source ID stay the same, moving the record does not create a new source.
+- The same provider-native ID in two independently named instances does not make them the same source.
+- Renaming a source instance changes the `source_ref` of each record in that instance.
 
-### `list`
+#### Source references
 
-Discover logical sources and return bounded metadata.
+The CLI uses `source_ref` values to select individual sources.\
+The reference is deterministic: the same identity information produces the same value.\
+These references do not embed native IDs or local paths.\
+The [logical identity specification](cli-json-contract.md#logical-identity) defines their encoding and required fields.
 
-Implemented selection and pagination flags include:
+### Location configuration
 
-- provider;
-- source instance;
-- page limit and cursor;
-- explicit provider-level root.
+Configuration selects a Codex home, Claude Code configuration root, or exact ChatGPT export ZIP.\
+The adapter handles the file layout within the selected location.\
+If the provider changes its internal directories, the adapter handles that change without requiring ordinary user configuration changes.
 
-### `show`
+Machine-specific paths belong in machine-local configuration.\
+See the [configuration reference](cli-json-contract.md#configuration) and provider documents for defaults, precedence, and failure handling.
 
-Return normalized source summary information.
+### Content versions
 
-### `events`
+A source can keep the same identity while its content changes.
 
-Return bounded normalized events for one source with explicit pagination.
+A caller can list sources and compare their version hints with values it has saved.\
+It can then verify possible changes and read normalized events.
 
-### `verify`
+#### Version hints
 
-Perform the stronger read needed to verify source identity, readability, completeness, and content version.
+A version hint indicates that a source may have changed.\
+It is not durable cryptographic evidence of the source's content.
 
-No command implies that a downstream consumer has reviewed or accepted a source.
+#### Verified versions
 
-The stable fields, exit codes, pagination behavior, bounds, compatibility rule, and content-handling policy are documented in [CLI JSON contract](cli-json-contract.md).
+`verify` reads source content and calculates a hash to identify its version.\
+The caller can retain this version information as provenance.
 
-The current executable contains the provider-neutral core and the production Codex, Claude Code, and ChatGPT Data Export adapters.
+## Record normalization
 
-## Consumer responsibilities
+Normalization must preserve meaningful differences between providers.\
+Do not treat different meanings as equivalent.
 
-Consumers own all domain-specific processing state.
+### Input formats
 
-Examples include:
+#### Isolation of provider internals
 
-- reviewed source versions;
-- retrospective findings;
-- evidence references;
-- proposals;
-- import decisions;
-- domain-specific derived records.
+Each adapter handles its provider's storage layout, row types, and correlation identifiers.\
+These can change between provider versions and must not become stable public fields.
 
-`agent-sessions` exposes evidence.\
-It does not assign meaning to that evidence.
+#### Format compatibility
 
-## Non-goals
+Provider documentation describes storage roots, transcript locations, and how to obtain exports.\
+Finding a record does not establish that an adapter supports its JSONL rows or conversation graph.\
+Adapters must establish format compatibility separately from record discovery.\
+[ADR 0003](decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md) explains this separation.
 
-The architecture does not currently provide:
+### Output information
 
-- a universal agent-memory system;
-- harness retrospective or improvement;
-- personal-memory semantics;
-- a canonical transcript archive;
-- automatic cross-machine synchronization;
-- background telemetry;
-- a web UI;
-- vector search;
-- cloud storage;
-- provider mutation operations.
+#### Source information
 
-A separate consumer may build such capabilities on top of the read contract when a concrete need exists.
+**Source relationships**
+
+Sources can include relationships stated in the provider's records.
+
+**Last interaction time (`last_interaction_at`)**
+
+`last_interaction_at` is the latest message or tool interaction time that the records establish for the logical source.\
+It is distinct from a file's modification time or provider management activity.\
+The [source-time specification](cli-json-contract.md#source-interaction-time) and provider documents define accepted observations and missing-time behavior.
+
+#### Events
+
+An event represents a message, tool call, tool result, or error read from a source.\
+Adapters normalize these records into common event types and preserve their order.
+
+**Tool outcomes**
+
+Adapters must use only verified, explicit provider fields to determine tool outcomes.\
+Do not infer success from output text such as `PASS`, matching text, or adjacent records.
+
+**Call/result relationships**
+
+Adapters must use only verified, explicit provider fields to determine call/result relationships.\
+Do not infer these relationships from output text, matching text, or adjacent records.
+
+#### Metadata
+
+Source and event metadata can include additional provider information when it is available.
+
+#### Recorded bodies
+
+An unknown tool outcome or unresolved call/result relationship does not prevent the tool from returning a readable body.\
+Report the unknown outcome or relationship as an omission.
+
+### Result completeness
+
+Parsing a file successfully does not mean that the result contains all relevant information.\
+Distinguish useful incomplete results, recognized but unsupported observations, and failures.\
+Report omitted, truncated, unsupported, or unknown material values.\
+Never label an incomplete result as `complete` or accept an unknown format as complete.\
+The [CLI completeness rules](cli-json-contract.md#completeness) define statuses, pagination, and aggregation across providers.
+
+## Record access
+
+### Read-only guarantee
+
+Read operations must not modify any of the following:
+
+- Provider history.
+- Provider application metadata.
+- Caller state.
+- Persistent `agent-sessions` state.
+
+Read commands cause no persistent `agent-sessions` writes.
+
+**File access times**
+
+The host file system may update a file's access-time metadata when it reads the file.\
+The no-write guarantee does not cover that file-system update.
+
+### Selecting a read interface
+
+Prefer a documented provider interface if it can find the required records and read their content faithfully.\
+It must also support read limits and avoid writes.\
+An official interface can still write data through metadata repair, migration, or synchronization.\
+If it does, a safer supported read path may be needed.\
+Direct file parsing is acceptable when needed to preserve the no-write guarantee.
+
+### File validation
+
+File-backed adapters open only regular files within size limits.\
+Directory-backed adapters recheck the identity of the opened file and the root.\
+They also verify that the resolved path is inside the configured root.\
+Exact-file adapters recheck the selected file and content snapshot.\
+Reject special files and paths replaced to point outside the configured root.
+
+### Input limits
+
+Enforce input limits for malformed, nested, compressed, oversized, and other adversarial data.\
+The provider documents define the accepted formats and input limits.
+
+### Read scope
+
+Read only the data required for the requested observation.\
+Use cheaper metadata to narrow sources when possible.
+
+Identity discovery alone may need only a header.\
+Finding the latest interaction time can require reading more of the transcript.
+
+## Execution model
+
+### Results independent of earlier runs
+
+With the same source data, configuration, and executable version, results must not depend on earlier runs.\
+The tool needs no initial inventory of session records.\
+It has no authoritative session database, transcript mirror, persistent index, or background event spool.
+
+### Background processing
+
+No daemon, watcher, timer, periodic synchronization, or lifecycle-hook ingestion is required.\
+When no command runs, CPU use, memory use, and disk I/O from the tool are zero.\
+Do not introduce periodic whole-history scans merely to improve interactive latency.
+
+### Conditions for adding a cache
+
+Consider SSD write endurance when changing the design.\
+Add a cache only if measurements with realistic data volumes show a significant discovery or parsing cost.\
+Review [ADR 0001](decisions/0001-use-stateless-read-only-source-access.md) before adding one.
+
+Any future cache must meet these requirements:
+
+- It is disposable and non-authoritative.\
+  Removing it may affect performance only.
+
+- It does not become caller processing state, require unnecessary persistent writes for unchanged reads, or introduce idle disk writes.
+
+- Measure its write amplification and any new persistent I/O on affected operating systems with realistic source volumes.
+
+## Recorded content handling
+
+### Content disclosure policy
+
+Return recorded content without automatic redaction.\
+Callers decide what to analyze, retain, or share.\
+[ADR 0004](decisions/0004-return-bounded-recorded-content-without-redaction.md) explains why the output retains this content.
+
+### Handling untrusted data
+
+Treat recorded content as untrusted data.\
+Do not execute recorded commands or follow URLs or tool requests in the records.\
+Do not treat recorded instructions as instructions for the current task.
+
+### Data in diagnostics
+
+Structured diagnostics must not copy source data or underlying errors unless necessary.
+
+## Maintenance
+
+### Public format versioning
+
+Reference formats, hint algorithms, verification hashing, and the public response schema are versioned separately.\
+A schema change alone must not change an otherwise identical source reference, hint, or verified version.\
+The CLI reference defines exact reference and verification encodings; provider documents define their hint algorithms.
+
+### Provider compatibility maintenance
+
+**Compatibility evidence**
+
+Before changing how an adapter finds or decodes records, verify the current provider documentation or implementation.\
+Keep compatibility evidence, decoding rules, and independently constructed synthetic tests with the owning adapter.
+
+The [record access requirements](#record-access) also apply to adapters.
+
+**Provider documentation**
+
+Use the provider document for the adapter being changed:
+
+- [Codex](provider-codex.md): home selection, inherited and sliced history, accepted versions, normalization, and input limits.
+- [Claude Code](provider-claude-code.md): configuration root, main transcripts, subagent limitations, accepted versions, and normalization.
+- [ChatGPT Data Export](provider-chatgpt-export.md): explicit ZIP selection, active branches, snapshot identity, and archive bounds.
+
+### Synthetic test data
+
+Use synthetic data for all tests and fixtures.\
+Make credential-like test values obviously fictional.\
+Do not create committed fixtures by redacting real private sessions.\
+Do not commit private session contents or machine-specific information.
+
+### Validation after changes
+
+Follow the applicable [repository instructions](../AGENTS.md) and run the [development validation commands](../README.md#development-validation) after implementation changes.
+
+## Architecture decisions
+
+The accepted ADRs explain why the current responsibilities and constraints were chosen.
+
+| Decision | Question it answers |
+| --- | --- |
+| [0001: Stateless, read-only source access](decisions/0001-use-stateless-read-only-source-access.md) | Why avoid a shared registry, transcript archive, and background processing? |
+| [0002: Named source instances](decisions/0002-model-provider-sources-as-named-instances.md) | Why separate logical identity from storage paths? |
+| [0003: Discovery and version-sensitive decoding](decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md) | Which provider facts can discovery rely on, and which formats need compatibility checks? |
+| [0004: Bounded content without automatic redaction](decisions/0004-return-bounded-recorded-content-without-redaction.md) | Why return recorded inputs and results, and what exposure does that require callers to handle? |
+
+**Changes to an architecture decision**
+
+If an architectural decision changes, update or supersede its ADR.\
+Keep the documentation, implementation, and tests consistent with that decision.

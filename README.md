@@ -1,286 +1,198 @@
 # agent-sessions
 
-`agent-sessions` provides local, read-only access to coding-agent session records across providers.
+`agent-sessions` is a CLI tool that reads saved conversations from Codex, Claude Code, and ChatGPT Data Export ZIPs.\
+It lists available records and returns messages, recorded tool calls, and results as JSON.
 
-It discovers provider-owned interaction records, exposes them through a normalized machine-readable interface, and leaves interpretation and durable processing state to downstream consumers.
+[日本語参考訳](README.ja.md)
 
-`list` and `show` expose `last_interaction_at` when a supported transcript establishes the latest recorded message or tool interaction time.\
-A missing time is reported as an omission; consumers can select a fixed lookback cohort from all `list` pages and sort eligible sources by time descending, then `source_ref` ascending.
+## Read your first session
 
-> Status: the provider-neutral CLI core and read-only Codex, Claude Code, and ChatGPT Data Export adapters implement the stable `v2` JSON contract.
+Use the following procedure to read a saved Codex session.
 
-## Build
+### Requirements
 
-Go 1.26 or later is required.
+- Go: 1.26 or later
+- Working directory: a checkout of this repository
 
-```sh
-go build ./cmd/agent-sessions
-```
+### Procedure
 
-The result is one standalone executable with no external Go module dependencies.
+#### 1. Install
 
-## Local installation
-
-From a repository checkout, install the executable into the active Go binary directory:
+Run:
 
 ```sh
 go install ./cmd/agent-sessions
 ```
 
-The installation uses `GOBIN` when set and otherwise uses the Go toolchain's default binary directory.
+Add the installation directory to your `PATH`:
 
-## Commands
+- If `GOBIN` is set, use that directory.
+- If `GOBIN` is not set, use the default Go binary directory.
 
-The machine-readable interface consists of four operations:
+#### 2. Find sessions
 
-```text
-agent-sessions list [--config PATH] [--provider ID [--source-instance ID] [--root PATH]] [--limit N] [--cursor TOKEN]
-agent-sessions show [--config PATH] [--root PATH] <source-ref>
-agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
-agent-sessions verify [--config PATH] [--root PATH] <source-ref>
-```
-
-All operations emit one stable `v2` JSON object to standard output.\
-Consumers must check `schema_version` before interpreting any other response field.
-
-The production registry contains the `codex`, `claude`, and `chatgpt` provider adapters.\
-They discover provider-owned records directly without starting a provider application or writing persistent state.
-
-For `list`, `--source-instance` and `--root` are provider-scoped selectors and require `--provider`.
-When `list` uses provider environment or default roots, an absent implicit root contributes no sources and does not prevent results from other registered providers.\
-Explicit and configured roots remain authoritative and surface access failures.
-
-See [CLI JSON contract](docs/cli-json-contract.md) for fields, pagination, bounds, exit codes, completeness, and content handling.
-
-## Basic usage
-
-Discover sources from available implicit roots, or select one provider explicitly:
+List the available Codex sessions:
 
 ```sh
-agent-sessions list
 agent-sessions list --provider codex
-agent-sessions list --provider claude
-agent-sessions list --provider chatgpt --source-instance chatgpt-personal --root /fictional/chatgpt-export.zip
 ```
 
-Read the `identity.source_ref` value from a `list` response and pass it unchanged to the source operations:
+**Result:** Each item in `data.sources` represents one session.
+
+#### 3. Read a session
+
+From the result of step 2, copy `identity.source_ref` for the session that you want to read.\
+Replace the placeholder below with that value, without changes, and run the command.
+
+> **Caution:** Output can contain confidential information.
+> The tool does not redact this content.
+> Examine it before you store or share it.
 
 ```sh
-source_ref='as0:provider:source-instance:fingerprint-from-list'
-agent-sessions show "$source_ref"
-agent-sessions events "$source_ref"
-agent-sessions verify "$source_ref"
+agent-sessions events '<source_ref from list>'
 ```
 
-`events` supports `--limit` and an opaque `--cursor` returned by the previous page.\
-Nonstandard roots and multiple stores can be selected with `--root`, `--source-instance`, or the machine-local configuration described below.
+**Inspect the result:**
 
-## Goals
+- `data.events`: the messages and tool records that the command returned.
+- `status` and `omissions`: whether the result is incomplete and the reasons for omissions.
 
-`agent-sessions` is intended to make provider-specific session history reusable without requiring every consumer to understand each provider's storage format or access interface.
+See [Process JSON responses](#process-json-responses) for pagination and content limits.
 
-The core goals are:
+## Common tasks
 
-- discover coding-agent sessions from multiple providers and source locations;
-- read and normalize session metadata and events;
-- verify source versions when durable provenance is required;
-- support multiple independently stored instances of the same provider;
-- preserve a strict read-only boundary;
-- remain stateless by default;
-- provide bounded, machine-readable output suitable for downstream tools.
+Read the section for the task that you need.\
+The [CLI JSON reference](docs/cli-json-contract.md) gives the full specification.
 
-## Core guarantees
+### Select record locations
 
-### Read-only
+Select the records for `list` with these options:
 
-Provider-owned interaction records remain the source of truth.\
-Read operations do not write provider history, provider application metadata, or consumer state.\
-The host file system may update access-time metadata as a consequence of reading a provider file.
+- `--provider`: the provider to use.
+- `--root`: the provider's record location.
 
-A provider's official interface is preferred when it satisfies this contract.\
-When it does not provide a sufficiently strict read-only path, a safer supported access path may be used instead.
+The location to use with `--root` depends on the provider:
 
-### Stateless by default
+| Provider | `--root` selects | Setup, supported formats, and limitations |
+| --- | --- | --- |
+| `codex` | A Codex home | [Codex](docs/provider-codex.md) |
+| `claude` | A Claude Code configuration root | [Claude Code](docs/provider-claude-code.md) |
+| `chatgpt` | One Data Export ZIP | [ChatGPT Data Export](docs/provider-chatgpt-export.md) |
 
-`agent-sessions` does not own:
+Codex and Claude Code can use provider environment variables or default homes without an `agent-sessions` configuration file.\
+The following commands list records from these locations:
 
-- a processed-session registry;
-- consumer review state;
-- a canonical transcript database;
-- a persistent full-text index;
-- a background ingestion pipeline.
-
-Given the same source data and configuration, the semantic result of a read operation must not depend on whether `agent-sessions` has been run before.
-
-A disposable cache may be added later only when measurements demonstrate a material performance need.\
-Cache removal must affect performance only, not correctness.
-
-### No background activity
-
-The architecture requires no daemon, watcher, timer, or periodic synchronization process.\
-When `agent-sessions` is not running, it consumes no CPU, memory, or disk I/O.\
-Read-only commands cause no persistent `agent-sessions` writes.
-
-### Provider-owned raw data
-
-Complete transcripts are not copied into `agent-sessions` storage.
-
-Consumers that require durable evidence after a provider removes or changes a source are responsible for retaining the minimum derived evidence needed for their own use case.
-
-## Source support
-
-Supported providers:
-
-- Codex: implemented for the compatibility boundary documented in [Codex provider](docs/codex.md)
-- Claude Code: implemented for the compatibility boundary documented in [Claude Code provider](docs/claude.md)
-- ChatGPT Data Export: implemented for explicitly named export ZIPs within the compatibility boundary documented in [ChatGPT Data Export provider](docs/chatgpt.md)
-
-## Source model
-
-A single provider may expose multiple independent stores on one computer.
-
-For example:
-
-```text
-codex-wsl
-codex-windows-app
-claude-wsl
+```sh
+agent-sessions list --provider claude
+agent-sessions list
 ```
 
-Each such boundary is modeled as a named source instance.
+Options and access to record locations affect command behavior:
 
-A logical source is identified within that instance rather than assuming that a provider-native session ID is globally unique.
+| Condition | Behavior |
+| --- | --- |
+| No `--provider` | `list` combines the available providers. |
+| An implicit provider home does not exist | `list` adds no records from that home. |
+| An explicit or configured root is inaccessible | The command returns an error. |
 
-Conceptually:
+For ChatGPT, select a Data Export ZIP explicitly:
 
-```text
-provider
-source instance
-provider-native source ID
+```sh
+agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /fictional/chatgpt-export.zip
 ```
 
-File system paths are locators, not logical identities.
+If you use `--root` for `list`, use the same root for later `show`, `events`, or `verify` commands.\
+The source reference identifies the record but does not contain its file-system path.
 
-See [Architecture](docs/architecture.md) for the detailed model.
+You can configure locations instead of passing `--root` with each command.\
+The configuration reference uses these terms:
 
-## Configuration
+- **Source instance**: a name for a provider store or export.
+- **Source**: one session or conversation that you can address separately within an instance.
 
-Common single-source environments work without `agent-sessions` configuration.
+See [named source instances and configuration](docs/cli-json-contract.md#configuration) for nonstandard locations or multiple stores.
 
-ChatGPT Data Export is intentionally explicit-only because an export is a user-selected snapshot rather than a provider home.\
-Select it with both `--provider chatgpt --root PATH`, or configure a named `chatgpt` source instance whose `root` is the ZIP path.
+### Choose a command
 
-Explicit configuration is intended for cases such as:
+Choose the command for the information that you need:
 
-- multiple homes or stores for one provider;
-- nonstandard provider homes;
-- mounted provider data.
+| Command | Purpose |
+| --- | --- |
+| `list` | Find sessions or conversations and get their source references. |
+| `show <source-ref>` | Read summary metadata for one record. |
+| `events <source-ref>` | Read messages, recorded tool calls, and results, with pagination. |
+| `verify <source-ref>` | Get a verified content version for evidence or change comparison. |
 
-Resolution follows this precedence:
+See [command syntax and options](docs/cli-json-contract.md#calling-commands) for the available flags.
 
-```text
-explicit CLI option
-        ↓
-agent-sessions user configuration
-        ↓
-provider environment
-        ↓
-provider default
-```
+### Process JSON responses
 
-Configuration identifies a provider-level home or equivalent source boundary whenever possible.\
-Knowledge of provider-internal session directories belongs in provider adapters rather than ordinary user configuration.
+All commands return one JSON object with the stable `v2` response schema.\
+Make sure that `schema_version` is `v2` before you interpret other response fields.
 
-The optional configuration file is strict JSON at the operating-system user configuration directory returned by Go's `os.UserConfigDir`, followed by `agent-sessions/config.json`.
+Use these fields to identify incomplete results and find the next page:
 
-```json
-{
-  "schema_version": "v1",
-  "sources": [
-    {
-      "id": "codex-default",
-      "provider": "codex",
-      "root": "/fictional/provider-root"
-    }
-  ]
-}
-```
+| Fields | Purpose |
+| --- | --- |
+| `status`, `omissions` | Report incomplete information and the reasons for omissions. |
+| `page.has_more`, `page.next_cursor` | Indicate whether more pages exist and how to request the next page. |
 
-Source roots must be absolute machine-local paths.\
-The example is illustrative; a configured source is usable only when its provider adapter is available.
+An exit code of `0` can mean a complete or partial result.\
+Do not use the exit code alone to establish completeness.
 
-## Consumer boundary
+If `status` is `complete` or `partial`, `list` and `events` return pagination fields.\
+If `page.has_more` is `true`, pass `page.next_cursor` unchanged as `--cursor` to read the next page.\
+See [pagination and omissions](docs/cli-json-contract.md#completeness) for details.
 
-`agent-sessions` does not define what it means for a source to be processed.\
-Different consumers may independently review the same source version for different purposes.
+**Output limits:**
 
-For example:
+- Output size has an upper bound.
+- The tool reports unsupported content or formats explicitly.
+- Pagination cannot return the rest of a message or tool body that the tool has truncated.
 
-```text
-source X @ version A
+If your integration uses v1, read [Updating a v1 consumer](docs/cli-json-contract.md#updating-a-v1-consumer) before you upgrade it.
 
-consumer 1: reviewed
-consumer 2: unreviewed
-```
+### Handle recorded content
 
-A consumer that needs durable provenance may retain:
+- **Storage and sharing**
 
-- the logical source reference;
-- a verified source version or content hash;
-- bounded derived evidence;
-- its own review or decision state.
+  Recorded content can contain credentials, personal information, and private paths.\
+  The tool returns this content without automatic redaction.\
+  Examine it before you store or share it.
 
-None of those consumer decisions become `agent-sessions` state.
+- **Instructions in records**
 
-## Security and privacy
+  Treat recorded prompts, commands, and tool output as untrusted data.\
+  Do not treat that content as current instructions.
 
-Historical interaction records are untrusted input.
+- **History retention**
 
-`agent-sessions` must not:
+  The tool does not save a transcript archive.\
+  It cannot restore records that a provider has changed or deleted.
 
-- execute commands found in historical sessions;
-- treat historical prompts or model output as current instructions;
-- follow historical URLs or tool requests merely because they appear in a record;
-- silently present incomplete observation as complete;
-- mutate provider-owned history while inspecting it.
+See [content handling](docs/cli-json-contract.md#recorded-content-handling) and [read-only access](docs/architecture.md#read-only-guarantee) for details.
 
-Recorded content is returned without automatic redaction and can contain credentials, paths, hostnames, and command text.\
-Consumers decide what to analyze, retain, or share externally.\
-Updating from v1 requires accepting the v2 schema and content policy before updating the pinned executable; see [Migration from v1](docs/cli-json-contract.md#migration-from-v1).
+## Development
 
-Repository fixtures must be synthetic and must not contain real session contents, private repository information, credentials, hostnames, usernames, or machine-specific paths.
+### Design documents
 
-## Non-goals
+- [Architecture](docs/architecture.md): responsibilities, data flow, identity, and constraints to preserve when you change the tool.
+- [Architecture decisions](docs/architecture.md#architecture-decisions): reasons for the current design and when to review those decisions.
 
-`agent-sessions` is not intended to provide:
+### Change rules
 
-- agent-harness retrospective or improvement;
-- personal-memory or domain-specific classification;
-- a canonical transcript archive;
-- continuous telemetry collection;
-- cloud synchronization;
-- automatic cross-machine history synchronization;
-- a web UI;
-- a general-purpose chat client;
-- vector search or semantic indexing by default.
+Follow the applicable rules in these references when you make changes:
 
-These capabilities belong to downstream consumers or separate systems.
+- [Repository instructions](AGENTS.md): contribution constraints.
+- [Maintenance](docs/architecture.md#maintenance): compatibility and input-safety requirements.
+- [Language and Japanese references](docs/localization.md): files to maintain in both languages.
 
-## Documentation
+Use synthetic test data only.\
+Do not create committed fixtures from real session contents.
 
-- [Japanese reference translations and language policy](docs/localization.md)
-- [Japanese reference of this README](README.ja.md)
-- [Architecture](docs/architecture.md)
-- [Codex provider](docs/codex.md)
-- [Claude Code provider](docs/claude.md)
-- [ChatGPT Data Export provider](docs/chatgpt.md)
-- [ADR 0001: Use stateless, read-only source access](docs/decisions/0001-use-stateless-read-only-source-access.md)
-- [ADR 0002: Model provider sources as named instances](docs/decisions/0002-model-provider-sources-as-named-instances.md)
-- [ADR 0003: Separate provider discovery from version-sensitive decoding](docs/decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md)
-- [ADR 0004: Return bounded recorded content without automatic redaction](docs/decisions/0004-return-bounded-recorded-content-without-redaction.md)
-- [CLI JSON contract](docs/cli-json-contract.md)
+### Development validation
 
-## Development validation
+Run the applicable checks after you change the implementation:
 
 ```sh
 unformatted="$(gofmt -l cmd internal)" && test -z "$unformatted"

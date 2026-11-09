@@ -13,7 +13,7 @@ Use the following languages for each type of content:
 | Maintainer-created Issues and pull requests: titles and `Summary` sections | English. |
 | Maintainer-created Issues and pull requests: remaining body and comments | Japanese by default. English may be used when appropriate. |
 
-For maintainer-created Issues and pull requests, full duplication of the body in both languages is not required.
+For maintainer-created public Issues and pull requests, do not write the full body in both English and Japanese.
 
 External contributors are not required to follow the maintainer's Japanese-language default.
 
@@ -67,7 +67,7 @@ Use the review result to choose the action:
 | Review result | Required action |
 | --- | --- |
 | The English change affects meaning needed to use the document correctly. | Create or update the Japanese reference in the same change. |
-| The English change does not affect Japanese meaning. | Leave the reference unchanged. Record the reason in the pull request's Validation or Risks / Follow-up section. |
+| The English change does not affect Japanese meaning. | Leave the reference unchanged. Record the reason in the pull request's `検証` (Validation) section. |
 | The English meaning or an established translation is materially ambiguous. | Do not guess. Report the affected pair and uncertainty. |
 
 Change only the affected pairs.\

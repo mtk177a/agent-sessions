@@ -29,7 +29,7 @@ Use the [policy definition of meaning](../../../docs/localization.md#update-hand
 | Assessment | Action |
 | --- | --- |
 | Meaning changes | Create or update the Japanese reference in the same change. |
-| Meaning does not change | Leave the Japanese file unchanged. Report why. When you prepare a pull request, record why under Validation or Risks / Follow-up. |
+| Meaning does not change | Leave the Japanese file unchanged. Report why. When you prepare a pull request, record why in its `検証` (Validation) section. |
 | English meaning or established Japanese terminology is materially ambiguous | Do not guess. Report the pair, ambiguity, and missing context. Where possible, continue work on independent pairs. |
 
 If materially different interpretations remain, report the missing context even when neutral wording or transliteration is possible.

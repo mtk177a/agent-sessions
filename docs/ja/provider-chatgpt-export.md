@@ -137,7 +137,7 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 #### 失敗の原因を示す error
 
 不正な ZIP データ、不正な JSON、重複メンバー、安全でないメンバー、ソースの置換、リソース制限に関する失敗には、それぞれ異なる構造化エラーコードを付ける。\
-エラーのフィールドとコードは、共通の [エラー仕様](cli-json-contract.md#エラーと終了コード) を参照する。
+エラーのフィールドとコードは、共通の [エラー仕様](cli-json-contract.md#エラー) を参照する。
 
 ## 入力の上限
 
@@ -162,7 +162,7 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 記録された内容は、自動で隠蔽せずに返す。\
 内容には秘密の値が含まれることがある。\
 保存する内容と外部への共有は呼び出し側が決める。\
-[内容の安全な扱い](cli-json-contract.md#内容の安全な扱い) を参照する。
+[記録内容の取り扱い](cli-json-contract.md#記録内容の取り扱い) を参照する。
 
 ## アダプターの仕様（保守者向け）
 

@@ -137,7 +137,7 @@ Unavailable content and unsupported structures are reported in `omissions`.
 #### Failure cause (`error`)
 
 Failures such as I/O and resource-processing failures are described by a structured `error`.\
-See the common [error specification](cli-json-contract.md#structured-errors-and-exit-codes) for fields and codes.
+See the common [error specification](cli-json-contract.md#errors) for fields and codes.
 
 ## Input limits
 
@@ -158,7 +158,7 @@ These limits apply in addition to the public [response and pagination limits](cl
 
 Recorded content is returned without automatic redaction.\
 It can contain secrets.\
-Callers decide what to retain or share externally; see [content safety](cli-json-contract.md#content-safety).
+Callers decide what to retain or share externally; see [recorded content handling](cli-json-contract.md#recorded-content-handling).
 
 ## Adapter specification for maintainers
 

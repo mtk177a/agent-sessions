@@ -133,7 +133,7 @@ Tool results also report omissions for their unknown call relationships and outc
 #### Failure cause (`error`)
 
 Malformed ZIP data, malformed JSON, duplicate members, unsafe members, source replacement, and resource-limit failures have distinct structured error codes.\
-See the common [error specification](cli-json-contract.md#structured-errors-and-exit-codes) for the error fields and codes.
+See the common [error specification](cli-json-contract.md#errors) for the error fields and codes.
 
 ## Input limits
 
@@ -157,7 +157,7 @@ The common [response and pagination bounds](cli-json-contract.md#resource-bounds
 
 The adapter returns recorded content without automatic redaction.\
 Content can contain secrets.\
-Callers decide what to retain or share externally; see [content safety](cli-json-contract.md#content-safety).
+Callers decide what to retain or share externally; see [recorded content handling](cli-json-contract.md#recorded-content-handling).
 
 ## Adapter specification for maintainers
 

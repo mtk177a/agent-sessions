@@ -30,6 +30,8 @@ The options apply to the commands shown in the table.
 | `--limit N` | `list`, `events` | Set page size; default 50, maximum 100. |
 | `--cursor TOKEN` | `list`, `events` | Continue with the opaque cursor returned by the previous page. |
 
+The `list --source-instance` and `list --root` options require `--provider` because source instance IDs and roots are provider-scoped.
+
 ### Selecting a source reference
 
 Copy `<source-ref>` from `identity.source_ref` in a `list` response; do not construct it from a file path.\
@@ -41,7 +43,9 @@ See [configuration](#configuration) for root selection and [Read every page](#re
 
 ## Configuration
 
-### Configuration file location and selection
+### Configuration file
+
+#### File selection
 
 The default path is `agent-sessions/config.json` below the platform user configuration directory returned by `os.UserConfigDir`.\
 An absent default file is valid and does not cause the directory or file to be created.
@@ -49,14 +53,16 @@ An absent default file is valid and does not cause the directory or file to be c
 `--config` selects an explicit configuration file.\
 It does not create or update that file.
 
-### Configuration fields and input rules
+#### Configuration structure
 
 Configuration uses strict JSON with its own `schema_version: v1`.
+
+#### Value constraints
 
 Provider and source instance IDs match `[a-z][a-z0-9-]{0,62}`.\
 Source instance IDs are unique within one provider, roots are absolute, and unknown fields are rejected.
 
-### Named source instance example
+#### Configuration example
 
 The following example configures two independent Codex homes.
 
@@ -79,9 +85,9 @@ Select one configured instance with `--source-instance`:
 agent-sessions list --provider codex --source-instance codex-one
 ```
 
-The `list --source-instance` and `list --root` options require `--provider` because source instance IDs and roots are provider-scoped.
+### Root resolution
 
-### Root selection precedence
+#### Selection precedence
 
 Resolution precedence is:
 
@@ -90,7 +96,7 @@ Resolution precedence is:
 3. provider environment;
 4. provider default.
 
-### Missing roots and access failures
+#### Root access
 
 Root selection and access have these rules:
 
@@ -102,22 +108,26 @@ Root selection and access have these rules:
 
 Provider-neutral discovery can therefore return available providers without requiring every registered provider to be installed.
 
-**ChatGPT exports**
+#### Provider-specific root requirements
 
 The `chatgpt` provider requires an explicit root.\
 The root is the exact Data Export ZIP selected by the user, not a directory to search.
 
 ## JSON response structure
 
-### Common fields and presence rules
-
 The public response schema is stable `v2`.\
 The same contract is implemented by the production Codex, Claude Code, and ChatGPT Data Export adapters.
 
 JSON is the only automation contract; human-readable output is not implemented.
 
+### Response schema validation
+
 A consumer must read and validate `schema_version` before interpreting `data` or any other version-dependent field.\
 A consumer that implements this contract accepts `v2` and rejects an unknown major version.
+
+After accepting the schema major, consumers must ignore unknown response fields.
+
+### Common response fields
 
 The following is the smallest complete `list` response:
 
@@ -145,7 +155,7 @@ The common response fields have these presence rules:
 | `schema_version` | Required. Always `v2` for this contract. |
 | `cli_version` | Required. Identifies the executable build and may be `dev`. |
 | `operation` | Required. One of `list`, `show`, `events`, `verify`, or `cli` for command-level errors. |
-| `status` | Required. One of the four [result states](#result-status-and-omissions). |
+| `status` | Required. One of the four [result states](#completeness). |
 | `data` | Required for `complete` and `partial` operation results; absent for `unsupported` and `error`. |
 | `page` | Required for successful or partial `list` and `events` results; absent otherwise. |
 | `omissions` | Required. It is empty for `complete`, non-empty for `partial` and `unsupported`, and may record output processing omissions for `error`. |
@@ -180,22 +190,23 @@ Event indexes are zero-based and preserve provider order.
 
 `verify` returns `data.source_ref` and `data.verified_version`.
 
-### Pagination fields and cursors
+### Page information
+
+**Fields**
 
 A `page` object requires integer `limit` and Boolean `has_more`.\
 `next_cursor` is required when `has_more` is true and absent otherwise.
 
-**Status while more pages remain**
+**Cursor**
 
-Pagination with `has_more: true` returns `partial`, an omission with code `pagination`, and a versioned `next_cursor`.\
 Cursor contents are opaque to consumers.
-
-**Cursor format**
 
 The current cursor begins with `v0:`.\
 That cursor format version is independent from `schema_version`.
 
 For the retrieval procedure, see [Read every page](#read-every-page).
+
+See [status](#status) for the completeness of a page with more results.
 
 ## Returned data types
 
@@ -279,16 +290,7 @@ For ChatGPT Data Export, the selected active branch defines the interactions con
 
 #### Common fields
 
-Each event requires `index`, `kind`, exactly one typed event payload, and bounded `metadata`.
-
-#### Event payloads by kind
-
-Supported kinds are:
-
-- `message`: `role` (`user` or `assistant`), recorded `text`, and Boolean `truncated`.
-- `tool_call`: optional `call_id` and recorded `name`, required `category` and `input_state`, optional `action` and `input`.
-- `tool_result`: required `outcome`, `correlation_state`, and `content_state`, optional `call_id`, `exit_code`, and `content`.
-- `error`: `category` and the recorded provider error `message`.
+Each event requires `index`, `kind`, exactly one kind-specific data object, and bounded `metadata`.
 
 #### Recorded event time
 
@@ -297,57 +299,50 @@ The timestamp belongs to the provider record, not an inferred operation start or
 `time_state` is `available`, `absent`, `unavailable`, or `unsupported`; only `available` includes `recorded_at`.\
 Missing or unusable times add `event_time_omitted` and make `events` partial.
 
-#### Recorded content
+#### Kind-specific data
 
-`input` and `content` use this shared representation:
+Each event has one typed data object for its `kind`:
 
-```json
-{"format":"json","text":"[\"go\",\"test\",\"./...\"]","truncated":false}
-```
+##### Message
 
-**Content fields**
+`message`: `role` (`user` or `assistant`), recorded `text`, and Boolean `truncated`.
 
-The content object has these fields:
+##### Tool call
 
-| Field | Rule |
-| --- | --- |
-| `format` | `text` or `json`. |
-| `text` | Always a string. |
-| `truncated` | Required Boolean. |
-| `omitted` | Optional Boolean. Reports excluded non-text or unsupported portions when readable content remains. |
+`tool_call`: optional `call_id` and recorded `name`, required `category` and `input_state`, optional `action` and `input`.
 
-**JSON and argument preservation**
+**Tool name**
 
-A JSON body is valid JSON unless `truncated` is true; a truncated prefix may not parse.\
-JSON formatting and object key order are not byte-preservation guarantees, but string values and array order are retained within the bounds.\
-An argument array remains an array encoded in the JSON string; it is never joined into an executable command.
+Tool names are opaque provider-specific values, not standardized tool interfaces.\
+A missing recorded name is omitted and reported as `tool_name_unavailable`.
 
-**Input and result content states**
+**Operation classification**
 
-`input_state` and `content_state` use these values:
-
-| State | Meaning and content object |
-| --- | --- |
-| `available` | The corresponding content object is required, including for an empty string, object, or array. |
-| `absent` | The verified format establishes absence. The content object is omitted. |
-| `unavailable` | Expected information is missing or unreadable. The content object is omitted. |
-| `unsupported` | The content shape is not supported. The content object is omitted. |
-
-`unavailable` and `unsupported` add `tool_input_unavailable` or `tool_content_unavailable` omissions.
-
-For body limits and truncation, see [Individual content bodies](#individual-content-bodies).
-
-#### Tool names and operation categories
-
-Tool names and JSON input/result keys are opaque provider-specific values, not standardized tool interfaces.\
-A missing recorded name is omitted and reported as `tool_name_unavailable`.\
 `category` retains broad classifications, and `action`, when present, is `execute`, `read`, `search`, `write`, `edit`, or `invoke`.
 
-#### Tool outcomes
+**Input**
+
+For `input_state`, see [Content acquisition states](#content-acquisition-states).\
+For the `input` representation, see [Content objects](#content-objects).
+
+##### Tool result
+
+`tool_result`: required `outcome`, `correlation_state`, and `content_state`, optional `call_id`, `exit_code`, and `content`.
+
+**Outcome**
 
 `outcome` is `success`, `failure`, or `unknown`.\
 Only explicit, verified provider fields establish success or failure; neither `PASS` nor error-like output text does so.\
 `unknown` retains readable content and adds `tool_outcome_unknown`.
+
+**Content**
+
+For `content_state`, see [Content acquisition states](#content-acquisition-states).\
+For the `content` representation, see [Content objects](#content-objects).
+
+##### Provider error
+
+`error`: `category` and the recorded provider error `message`.
 
 #### Call/result relationships
 
@@ -371,15 +366,57 @@ No relationship is inferred from adjacency or matching text.
 Correlation is resolved over the entire selected history before pagination.\
 Normalized call IDs retain their adapter-owned `v0` algorithm namespace, independent from the response schema; raw provider correlation identifiers are not public call IDs.
 
+### Content objects
+
+`input` and `content` use this shared representation:
+
+```json
+{"format":"json","text":"[\"go\",\"test\",\"./...\"]","truncated":false}
+```
+
+**Fields**
+
+The content object has these fields:
+
+| Field | Rule |
+| --- | --- |
+| `format` | `text` or `json`. |
+| `text` | Always a string. |
+| `truncated` | Required Boolean. |
+| `omitted` | Optional Boolean. Reports excluded non-text or unsupported portions when readable content remains. |
+
+**JSON preservation**
+
+A JSON body is valid JSON unless `truncated` is true; a truncated prefix may not parse.\
+JSON formatting and object key order are not byte-preservation guarantees, but string values and array order are retained within the bounds.\
+An argument array remains an array encoded in the JSON string; it is never joined into an executable command.
+
+Keys inside recorded JSON inputs or results are opaque provider-specific values, not standardized tool interfaces.
+
+### Content acquisition states
+
+`input_state` and `content_state` use these values:
+
+| State | Meaning and content object |
+| --- | --- |
+| `available` | The corresponding content object is required, including for an empty string, object, or array. |
+| `absent` | The verified format establishes absence. The content object is omitted. |
+| `unavailable` | Expected information is missing or unreadable. The content object is omitted. |
+| `unsupported` | The content shape is not supported. The content object is omitted. |
+
+`unavailable` and `unsupported` add `tool_input_unavailable` or `tool_content_unavailable` omissions.
+
+For body limits and truncation, see [Individual content bodies](#individual-content-bodies).
+
 ### Verified versions
-
-#### Fields and purpose
-
-`verified_version` requires `algorithm`, `basis`, and `value`.\
-The current values use `sha256`, `provider-content-v0`, and a `sha256:`-prefixed digest.
 
 Use this content version for provenance or to compare observations of the same source.\
 Verification does not mark the source as reviewed or retain a transcript.
+
+#### Fields
+
+`verified_version` requires `algorithm`, `basis`, and `value`.\
+The current values use `sha256`, `provider-content-v0`, and a `sha256:`-prefixed digest.
 
 #### Verified-version encoding
 
@@ -389,7 +426,7 @@ Each chunk name and content is prefixed with its unsigned 64-bit big-endian byte
 The hash uses its own `v0` domain separator and `provider-content-v0` basis, independently from `schema_version`.\
 They change only when the hashing meaning or algorithm changes.
 
-### Source and event metadata
+### Metadata
 
 **Entry format**
 
@@ -404,9 +441,11 @@ Only bounded metadata that is safe to expose without inventing a provider-neutra
 An adapter reports a material value that cannot be represented faithfully as an omission.\
 It does not promote an unstable provider field into the stable schema or claim `complete` by guessing an equivalent common meaning.
 
-## Result status and omissions
+## Interpreting results
 
-### Status values and constraints
+### Completeness
+
+#### Status
 
 The response reports one of these states in `status`:
 
@@ -421,68 +460,34 @@ A `complete` response cannot contain omissions or an error.\
 A `partial` response contains at least one omission.\
 Unknown provider shapes and values whose meaning cannot be established must not produce `complete`.
 
-### Omission fields and counts
+**Pagination status**
+
+Pagination with `has_more: true` returns `partial`, an omission with code `pagination`, and a versioned `next_cursor`.
+
+#### Omissions
 
 Every omission requires token-valued `code` and `scope` plus a safe human-readable `message`.\
 The optional positive integer `count` reports how many known items that omission represents; its absence does not imply zero affected provider values.
 
-### Combining results from multiple providers
+#### Combining results from multiple providers
 
 For `list`, multiple adapter results are aggregated independently of adapter order.\
 If every observed adapter result is unsupported, the response is `unsupported`; if an unsupported omission is combined with any complete or partial observation, the response is `partial`.
 
-## Consumer procedures
+### Errors
 
-### Read every page
-
-For `list` and `events`, keep the same source selection for every request, including any explicit root or configuration.
-
-Follow these steps to read the pages:
-
-1. Validate `schema_version` before interpreting version-dependent fields.
-2. Inspect `status` and `omissions`, and read any available operation data.
-3. If `page.has_more` is `true`, pass `page.next_cursor` unchanged to the same operation.
-4. Continue until `has_more` is `false`, retaining omissions from all pages.
-
-Use the returned cursor in these command forms:
-
-```sh
-agent-sessions list --provider codex --limit 50 --cursor '<page.next_cursor>'
-agent-sessions events --limit 50 --cursor '<page.next_cursor>' '<source_ref>'
-```
-
-**Completeness after the last page**
-
-Finishing pagination does not resolve other omissions, and exit code `0` does not establish completeness.\
-A smaller page limit does not recover an individually truncated body; see [Individual content bodies](#individual-content-bodies).
-
-**Source changes between requests**
-
-Offset pagination cannot guarantee a fixed snapshot if the source changes between requests.\
-Use the same source data and executable, and compare verified versions before and after when required.
-
-### Selecting recent sources
-
-For a fixed lookback period, select sources as follows:
-
-1. Collect every `list` page.
-2. Exclude sources without `last_interaction_at` from the subset with known times.
-3. Compare timestamps as absolute instants for the requested period.
-4. Sort eligible sources by `last_interaction_at` descending, then by `identity.source_ref` ascending.
-
-A partial listing, including a missing source time or an unfinished page, cannot establish that the selected sources are exhaustive.
-
-## Structured errors and exit codes
-
-### Error object fields
+#### Error object
 
 Structured errors require token-valued `code` and `category`, a fixed human-readable `message`, Boolean `retryable`, and a `details` array.\
 Each detail entry requires token-valued `name` and a safe string `value`; the array may be empty.\
 The current CLI errors are not retryable.
 
-### Error categories and codes
+#### Error categories
 
-The stable error categories are `usage`, `configuration`, `provider`, `resource`, and `internal`.\
+The stable error categories are `usage`, `configuration`, `provider`, `resource`, and `internal`.
+
+#### Error codes
+
 The current error codes are:
 
 - `missing_command`.
@@ -542,7 +547,7 @@ The common limits are:
 | Page size | default 50, maximum 100 |
 | Encoded response | 8 MiB |
 
-### Input and verification evidence limits
+### Input bound scope
 
 The common 64 MiB evidence bound applies to adapters that return evidence chunks to the CLI.\
 An archive adapter may stream a larger, provider-bounded source into the same `provider-content-v0` verified-version algorithm without materializing it as an evidence chunk.\
@@ -550,7 +555,7 @@ Provider-specific input bounds are documented with each adapter and do not incre
 
 ### Output that exceeds a limit
 
-#### Strings and identifiers
+#### String fields
 
 Truncated dynamic output adds a `resource_truncation` omission and cannot remain complete.
 
@@ -575,15 +580,15 @@ For paginated operations, retry from the same cursor with a smaller `--limit`.\
 `retryable` remains false because repeating the unchanged request does not resolve the limit.\
 Reducing the page limit does not recover an individually truncated body.
 
-## Content safety
+## Recorded content handling
 
-### Unredacted content, retention, and sharing
+### Content disclosure policy
 
 Recorded content is returned without automatic redaction, including credential-like values, paths, hostnames, code, search text, and command text.\
 There is no redaction switch and no `redaction_policy_version` output field.\
 Consumers decide what to analyze, retain, or share externally.
 
-### Recorded commands and instructions
+### Handling untrusted data
 
 Historical content remains untrusted data and is never executed or treated as current instructions.
 
@@ -593,14 +598,66 @@ CLI diagnostics do not unnecessarily copy underlying errors or source records.
 
 Underlying errors, source roots, and raw arguments are not copied into public diagnostics.
 
-## Versions and compatibility
+## Consumer procedures
 
-### Response schema compatibility
+### Read every page
 
-A consumer must read and validate `schema_version` before interpreting `data` or any other version-dependent field.\
-A consumer that implements this contract accepts `v2` and rejects an unknown major version.
+For `list` and `events`, keep the same source selection for every request, including any explicit root or configuration.
 
-Additive optional fields may be introduced within `v2`, and consumers must ignore unknown response fields after accepting the schema major.\
+Follow these steps to read the pages:
+
+1. Validate `schema_version` before interpreting version-dependent fields.
+2. Inspect `status` and `omissions`, and read any available operation data.
+3. If `page.has_more` is `true`, pass `page.next_cursor` unchanged to the same operation.
+4. Continue until `has_more` is `false`, retaining omissions from all pages.
+
+Use the returned cursor in these command forms:
+
+```sh
+agent-sessions list --provider codex --limit 50 --cursor '<page.next_cursor>'
+agent-sessions events --limit 50 --cursor '<page.next_cursor>' '<source_ref>'
+```
+
+**Completeness after the last page**
+
+Finishing pagination does not resolve other omissions, and exit code `0` does not establish completeness.\
+A smaller page limit does not recover an individually truncated body; see [Individual content bodies](#individual-content-bodies).
+
+**Source changes between requests**
+
+Offset pagination cannot guarantee a fixed snapshot if the source changes between requests.\
+Use the same source data and executable, and compare verified versions before and after when required.
+
+### Selecting recent sources
+
+For a fixed lookback period, select sources as follows:
+
+1. Collect every `list` page.
+2. Exclude sources without `last_interaction_at` from the subset with known times.
+3. Compare timestamps as absolute instants for the requested period.
+4. Sort eligible sources by `last_interaction_at` descending, then by `identity.source_ref` ascending.
+
+A partial listing, including a missing source time or an unfinished page, cannot establish that the selected sources are exhaustive.
+
+### Updating a v1 consumer
+
+See [Changes from v1](#changes-from-v1) for changed fields and content handling.
+
+Before updating the pinned executable, complete these steps:
+
+1. Make the consumer accept v2 and read input and result content.
+2. Handle unknown values and omissions.
+3. Review retention and sharing.
+
+**Previous executable**
+
+Keep or restore the previous executable when v1 is required or integration fails.
+
+## Versioning
+
+### Response schema change rules
+
+Additive optional fields may be introduced within `v2`.\
 Removing or changing a required field, changing an existing field's meaning, or incompatibly changing a status, event kind, exit code, logical identity rule, or other required semantic requires a new major schema version.
 
 ### Independent format versions
@@ -609,24 +666,16 @@ Removing or changing a required field, changing an existing field's meaning, or 
 The configuration schema is separately validated and currently accepts exactly `v1`.
 
 Source references, fingerprint hashing, verification hashing, call IDs, and cursors also have versions independent from the response schema.\
-Their formats are defined in [Logical identity](#logical-identity), [Verified-version encoding](#verified-version-encoding), [Call/result relationships](#callresult-relationships), and [Pagination fields and cursors](#pagination-fields-and-cursors).
+Their formats are defined in [Logical identity](#logical-identity), [Verified-version encoding](#verified-version-encoding), [Call/result relationships](#callresult-relationships), and [Page information](#page-information).
 
-### Migration from v1
+### Changes from v1
 
-**Changed and unchanged behavior**
+**Changed behavior**
 
 v2 removes automatic redaction guarantees and represents inputs, results, unknown outcomes, and unresolved correlations.\
 `success`, `excerpt`, `redacted`, and `evidence_state` are replaced by the new fields; `input_state: withheld` becomes `available` with actual `input`.\
 The new executable has no v1 output mode.
 
+**Unchanged formats**
+
 Configuration `schema_version: v1`, commands and arguments, source references, and verification hashing are unchanged.
-
-**Upgrade procedure and the previous executable**
-
-Before updating the pinned executable, complete these steps:
-
-1. Make the consumer accept v2 and read input and result content.
-2. Handle unknown values and omissions.
-3. Review retention and sharing.
-
-Keep or restore the previous executable when v1 is required or integration fails.

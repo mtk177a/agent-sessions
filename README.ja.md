@@ -144,7 +144,7 @@ agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /
 
 `status` が `complete` または `partial` の場合、`list` と `events` はページ分割用のフィールドを返す。\
 `page.has_more` が `true` なら、`page.next_cursor` を変更せず `--cursor` として渡し、次のページを取得する。\
-詳細は [ページ分割と省略](docs/ja/cli-json-contract.md#結果の状態と省略) を参照する。
+詳細は [ページ分割と省略](docs/ja/cli-json-contract.md#完全性) を参照する。
 
 **出力の制限:**
 
@@ -152,7 +152,7 @@ agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /
 - 未対応の内容や形式は明示的に報告する。
 - 切り詰められたメッセージやツールの本文の残りは、ページ分割では取得できない。
 
-v1 を使う連携処理を更新する場合は、更新前に [v1 からの移行](docs/ja/cli-json-contract.md#v1-からの移行) を読む。
+v1 を使う連携処理を更新する場合は、更新前に [呼び出し側の更新手順](docs/ja/cli-json-contract.md#v1-対応の呼び出し側を更新する) を読む。
 
 ### 取得した内容を扱う
 
@@ -172,7 +172,7 @@ v1 を使う連携処理を更新する場合は、更新前に [v1 からの移
   このツールは、対話履歴のコピーを保存しない。\
   プロバイダー側で変更・削除された記録の復元には使えない。
 
-詳細は [内容の扱い](docs/ja/cli-json-contract.md#内容の安全な扱い) と [読み取り専用のアクセス](docs/ja/architecture.md#読み取り専用の保証) を参照する。
+詳細は [内容の扱い](docs/ja/cli-json-contract.md#記録内容の取り扱い) と [読み取り専用のアクセス](docs/ja/architecture.md#読み取り専用の保証) を参照する。
 
 ## 開発
 

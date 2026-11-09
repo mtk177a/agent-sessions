@@ -142,7 +142,7 @@ Do not use the exit code alone to establish completeness.
 
 If `status` is `complete` or `partial`, `list` and `events` return pagination fields.\
 If `page.has_more` is `true`, pass `page.next_cursor` unchanged as `--cursor` to read the next page.\
-See [pagination and omissions](docs/cli-json-contract.md#result-status-and-omissions) for details.
+See [pagination and omissions](docs/cli-json-contract.md#completeness) for details.
 
 **Output limits:**
 
@@ -150,7 +150,7 @@ See [pagination and omissions](docs/cli-json-contract.md#result-status-and-omiss
 - The tool reports unsupported content or formats explicitly.
 - Pagination cannot return the rest of a message or tool body that the tool has truncated.
 
-If your integration uses v1, read [Migration from v1](docs/cli-json-contract.md#migration-from-v1) before you upgrade it.
+If your integration uses v1, read [Updating a v1 consumer](docs/cli-json-contract.md#updating-a-v1-consumer) before you upgrade it.
 
 ### Handle recorded content
 
@@ -170,7 +170,7 @@ If your integration uses v1, read [Migration from v1](docs/cli-json-contract.md#
   The tool does not save a transcript archive.\
   It cannot restore records that a provider has changed or deleted.
 
-See [content handling](docs/cli-json-contract.md#content-safety) and [read-only access](docs/architecture.md#read-only-guarantee) for details.
+See [content handling](docs/cli-json-contract.md#recorded-content-handling) and [read-only access](docs/architecture.md#read-only-guarantee) for details.
 
 ## Development
 

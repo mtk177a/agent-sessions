@@ -112,7 +112,7 @@ agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /
 - **ソースインスタンス**: プロバイダーの保存場所やエクスポートに付ける名前。
 - **ソース**: ソースインスタンス内で個別に指定できる一つのセッションや会話。
 
-標準以外の場所や複数の保存場所の設定方法は、[名前付きソースインスタンスと設定](docs/ja/cli-json-contract.md#設定) を参照する。
+標準以外の場所や複数の保存場所の設定方法は、[名前付きソースインスタンスと設定](docs/ja/cli-json-contract.md#読み取り対象の設定) を参照する。
 
 ### 実行するコマンドを選ぶ
 
@@ -144,7 +144,7 @@ agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /
 
 `status` が `complete` または `partial` の場合、`list` と `events` はページ分割用のフィールドを返す。\
 `page.has_more` が `true` なら、`page.next_cursor` を変更せず `--cursor` として渡し、次のページを取得する。\
-詳細は [ページ分割と省略](docs/ja/cli-json-contract.md#完全性と省略) を参照する。
+詳細は [ページ分割と省略](docs/ja/cli-json-contract.md#結果の状態と省略) を参照する。
 
 **出力の制限:**
 
@@ -172,7 +172,7 @@ v1 を使う連携処理を更新する場合は、更新前に [v1 からの移
   このツールは、対話履歴のコピーを保存しない。\
   プロバイダー側で変更・削除された記録の復元には使えない。
 
-詳細は [内容の扱い](docs/ja/cli-json-contract.md#内容の扱い) と [読み取り専用のアクセス](docs/ja/architecture.md#読み取り専用のアクセスとリソース管理) を参照する。
+詳細は [内容の扱い](docs/ja/cli-json-contract.md#内容の安全な扱い) と [読み取り専用のアクセス](docs/ja/architecture.md#読み取り専用のアクセスとリソース管理) を参照する。
 
 ## 開発
 

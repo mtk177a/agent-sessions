@@ -7,10 +7,6 @@ For common `v2` JSON fields, see the [CLI reference](cli-json-contract.md).
 
 ## Usage procedure
 
-<a id="claude-code-root-selection"></a>
-
-<a id="select-a-claude-code-root"></a>
-
 ### 1. Select the record location
 
 Select the Claude Code configuration directory.\
@@ -81,10 +77,6 @@ agent-sessions events --root /fictional/claude-root '<source_ref from list>'
 
 If you use provider settings or a configured instance, omit `--root` from this command.
 
-<a id="supported-records-and-limitations"></a>
-
-<a id="support-by-operation"></a>
-
 ## Supported formats
 
 Support for interaction time differs from support for event decoding and format verification:
@@ -99,15 +91,13 @@ The adapter does not accept unverified structures as complete.\
 Forward-compatible interaction-time decoding does not extend verified `events` or `verify` support.
 
 Unknown potentially interactive rows or unusable timestamps prevent a source time.\
-See [source interaction time](#source-interaction-time) for the detailed rules.
+See [latest interaction time](#latest-interaction-time) for the detailed rules.
 
 ## Reading the output
 
 ### Returned data
 
 The information in `data` depends on the operation.
-
-<a id="subagent-record-limitations"></a>
 
 #### Source information
 
@@ -126,10 +116,6 @@ Each entire tool input or result is bounded to 64 KiB.
 #### Verified version
 
 `verify` returns a verified version of the main transcript.
-
-<a id="incomplete-results-and-failures"></a>
-
-<a id="incomplete-observations-and-input-limits"></a>
 
 ### Operation status
 
@@ -174,17 +160,11 @@ Recorded content is returned without automatic redaction.\
 It can contain secrets.\
 Callers decide what to retain or share externally; see [content safety](cli-json-contract.md#content-safety).
 
-<a id="adapter-behavior-for-maintainers"></a>
-
 ## Adapter specification for maintainers
 
 The following sections define how the adapter identifies records and converts their contents.\
 Internal JSONL structures depend on the provider version; they are not stable public fields.\
 Apply the common [adapter maintenance constraints](architecture.md#maintaining-provider-adapters) when changing these rules.
-
-<a id="record-discovery-and-source-identity"></a>
-
-<a id="discovery-identity-and-content-versions"></a>
 
 ### Record reading
 
@@ -195,10 +175,6 @@ It rejects symlinks and special files, and rechecks file and root identity when 
 #### Main transcript
 
 Main session transcripts are stored at `projects/<project>/<session-id>.jsonl` below the configuration root.
-
-<a id="subagent-record-handling"></a>
-
-<a id="subagent-locations-and-sidecars"></a>
 
 #### Subagent records
 
@@ -235,16 +211,10 @@ Subagent artifacts are not exposed as separate logical sources within the suppor
 The verified transcript and sidecar records do not provide an independent provider-owned subagent identity field.\
 Deriving identity from a filename or relationships from a path would violate the common identity contract.
 
-<a id="version-hints-for-change-detection"></a>
-
 #### Version hint
 
 The list version hint is a domain-separated hash of the artifact count, sizes, and modification times.\
 For the distinction between a hint and a verified version, see [change detection and content verification](architecture.md#change-detection-and-content-verification).
-
-<a id="source-interaction-time"></a>
-
-<a id="interaction-time-classification"></a>
 
 #### Latest interaction time
 
@@ -293,15 +263,7 @@ The adapter does not return a source time in these cases:
 - A version is malformed, or is older than `2.1.260` and unverified.
 - More than one transcript has the same session identity.
 
-<a id="event-normalization"></a>
-
-<a id="tool-calls-results-and-event-timestamps"></a>
-
 ### Event generation
-
-<a id="accepted-rows-and-omitted-content"></a>
-
-<a id="messages-and-omitted-content"></a>
 
 #### Event row selection
 
@@ -324,8 +286,6 @@ Convert each supported event type using the following rules.
 ##### Message events
 
 Public user and assistant text becomes message events.
-
-<a id="tool-call-names-categories-and-inputs"></a>
 
 ##### Tool call events
 
@@ -356,12 +316,6 @@ It reports input availability as follows:
 
 Tool call identifiers are deterministic, adapter-owned hashes of the session identity and provider correlation identifier.
 
-<a id="tool-result-bodies"></a>
-
-<a id="call-and-result-relationships"></a>
-
-<a id="tool-outcomes"></a>
-
 ##### Tool result events
 
 **Body**
@@ -388,20 +342,14 @@ The adapter determines result `outcome` from the verified meaning of `tool_resul
 | `true` | Failure |
 | Invalid value | Unknown; retain the body |
 
-<a id="provider-errors"></a>
-
 ##### Provider error events
 
 The adapter normalizes explicit provider API errors.
-
-<a id="individual-event-timestamps"></a>
 
 #### Event timestamp assignment
 
 Events use their transcript row's timestamp.\
 Events from one row therefore share `recorded_at`.
-
-<a id="content-verification"></a>
 
 ### Verified-version calculation
 
@@ -417,8 +365,6 @@ The main transcript uses the path-free evidence name `transcript/primary.jsonl`.
 
 ## Compatibility evidence
 
-<a id="official-location-and-lifecycle-references"></a>
-
 ### Storage location evidence
 
 The following official documents describe record locations and lifecycle inputs:
@@ -430,8 +376,6 @@ The following official documents describe record locations and lifecycle inputs:
 
 These references establish the location and lifecycle boundary.\
 They do not make the internal JSONL entry structure a stable public API.
-
-<a id="checks-by-version"></a>
 
 ### Internal format checks
 
@@ -445,8 +389,6 @@ Compatibility was checked using the following evidence:
 
 These checks do not verify every possible row structure.\
 Unknown rows and blocks still prevent `complete`.
-
-<a id="read-only-behavior-checks"></a>
 
 ### Read-only checks
 

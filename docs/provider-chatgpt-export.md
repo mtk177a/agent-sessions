@@ -11,9 +11,6 @@ Request and download an export before using the adapter.\
 Follow OpenAI's [export instructions](https://help.openai.com/en/articles/7260999-how-do-i-export-my-data) for ChatGPT settings or the Privacy Portal, and download within the stated availability period.\
 `agent-sessions` does not request, poll for, discover, or download exports.
 
-<a id="select-an-export-zip"></a>
-<a id="export-zip-selection"></a>
-
 ### 2. Select the export ZIP
 
 Select each archive as a named source instance.\
@@ -65,9 +62,6 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 
 If you use the configured instance, omit `--root` from this command; the configuration supplies the location.
 
-<a id="conversations-branches-and-content"></a>
-<a id="supported-records-and-limitations"></a>
-
 ## Reading the output
 
 ### Returned data
@@ -75,16 +69,11 @@ If you use the configured instance, omit `--root` from this command; the configu
 The `data` field contains the information requested by the operation.\
 The following sections describe each kind of returned data.
 
-<a id="support-by-operation"></a>
-
 #### Source information
 
 `list` and `show` return conversation information.\
 They include `last_interaction_at` when the selected branch establishes the latest interaction time.\
 Otherwise, they omit the field and return `partial` with `source_time_unavailable`.
-
-<a id="conversation-branch-limits"></a>
-<a id="returned-content-and-handling"></a>
 
 #### Events
 
@@ -108,8 +97,6 @@ It cannot establish their call correlation or outcome and reports these missing 
 
 `verify` returns a verified content version that covers the whole ZIP.
 
-<a id="incomplete-results-and-failures"></a>
-
 ### Operation status
 
 Use the status fields to identify complete observations, incomplete observations, unsupported input, and failures.
@@ -129,8 +116,6 @@ Unknown content or nodes can leave useful events and return `partial`.\
 If no safely usable event remains after omissions, the observation returns `unsupported`.\
 Recognized but incompatible JSON structures also return `unsupported`, rather than a malformed-input error.
 
-<a id="interaction-timestamps"></a>
-
 #### Omission reasons (`omissions`)
 
 These codes explain provider-specific omissions:
@@ -149,8 +134,6 @@ Tool results also report omissions for their unknown call relationships and outc
 
 Malformed ZIP data, malformed JSON, duplicate members, unsafe members, source replacement, and resource-limit failures have distinct structured error codes.\
 See the common [error specification](cli-json-contract.md#structured-errors-and-exit-codes) for the error fields and codes.
-
-<a id="archive-limits"></a>
 
 ## Input limits
 
@@ -176,8 +159,6 @@ The adapter returns recorded content without automatic redaction.\
 Content can contain secrets.\
 Callers decide what to retain or share externally; see [content safety](cli-json-contract.md#content-safety).
 
-<a id="adapter-behavior-for-maintainers"></a>
-
 ## Adapter specification for maintainers
 
 OpenAI documents export acquisition and the presence of chat history in the ZIP.\
@@ -185,9 +166,6 @@ It does not document the internal conversation JSON graph as a stable API.\
 The adapter therefore owns compatibility checks for the internal member names and fields that it uses for normalization.
 
 Apply the common [adapter maintenance constraints](architecture.md#maintaining-provider-adapters) when changing these rules.
-
-<a id="archive-validation"></a>
-<a id="zip-safety-checks"></a>
 
 ### Archive reading
 
@@ -207,16 +185,11 @@ The adapter rejects:
 - Encrypted members.
 - Symbolic links and other special member types.
 
-<a id="archive-members-and-conversation-identity"></a>
-<a id="conversation-discovery-and-source-identity"></a>
-
 **Conversation JSON selection**
 
 The decoder reads `conversations.json` and numbered `conversations-*.json` members in deterministic member-name order.
 
 ### Source information generation
-
-<a id="identity-and-verification"></a>
 
 #### Identity
 
@@ -228,15 +201,10 @@ Paths and archive member names are locators, not conversation identities.
 
 Replacing the ZIP with a later export can preserve conversation identity while changing the snapshot and verified version.
 
-<a id="version-hints-for-change-detection"></a>
-
 #### Version hint
 
 The SHA-256 of the whole ZIP is the `snapshot_hash` version hint.\
 All conversations in that snapshot share the hint.
-
-<a id="interaction-time-classification"></a>
-<a id="source-interaction-time"></a>
 
 #### Latest interaction time
 
@@ -266,11 +234,8 @@ The field remains absent in these cases:
 
 `list` aggregates the number of affected conversations in one omission.
 
-<a id="event-normalization"></a>
-
 ### Event generation
 
-<a id="branch-traversal-and-event-normalization"></a>
 #### Conversation branch selection
 
 For `events`, the adapter selects the active branch in this order:
@@ -315,8 +280,6 @@ Results use `outcome: unknown`, with a corresponding omission.
 
 The adapter sets `recorded_at` from the original message's `create_time`.\
 Missing or invalid values make `events` partial with `event_time_omitted`.
-
-<a id="content-verification"></a>
 
 ### Verified-version calculation
 

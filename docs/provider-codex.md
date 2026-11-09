@@ -7,10 +7,6 @@ For common `v2` JSON fields, see the [CLI reference](cli-json-contract.md).
 
 ## Usage procedure
 
-<a id="codex-home-selection"></a>
-
-<a id="select-a-codex-home"></a>
-
 ### 1. Select the record location
 
 Select the Codex home.\
@@ -81,14 +77,6 @@ agent-sessions events --root /fictional/codex-home '<source_ref from list>'
 
 If you use provider settings or a configured instance, omit `--root` from this command.
 
-<a id="supported-records-and-limits"></a>
-
-<a id="compatibility-by-operation"></a>
-
-<a id="compressed-rollout-limitations"></a>
-
-<a id="supported-formats-and-limitations"></a>
-
 ## Supported formats
 
 Event decoding and format verification accept the verified mode and structure combinations for the 32 observed version labels from `0.92.0` through `0.155.0-alpha.9.2`.
@@ -131,10 +119,6 @@ Each entire input or result follows the common 64 KiB bound; truncation and omis
 
 `verify` returns a verified version of the selected logical history.
 
-<a id="incomplete-results-and-failures"></a>
-
-<a id="incomplete-observations-and-input-limits"></a>
-
 ### Operation status
 
 #### Status (`status`)
@@ -165,8 +149,6 @@ Known items that cannot be represented by the public event model still produce e
 Failures such as I/O and resource-processing failures are described by a structured `error`.\
 See the common [error specification](cli-json-contract.md#structured-errors-and-exit-codes) for fields and codes.
 
-<a id="input-bounds"></a>
-
 ## Input limits
 
 Codex adapter input has these limits:
@@ -188,16 +170,10 @@ Recorded content is returned without automatic redaction.\
 It can contain secrets.\
 Callers decide what to retain or share externally; see [content safety](cli-json-contract.md#content-safety).
 
-<a id="adapter-behavior-for-maintainers"></a>
-
 ## Adapter specification for maintainers
 
 Rollout JSONL is a version-sensitive adapter input, not a stable public API.\
 Apply the common [adapter maintenance constraints](architecture.md#maintaining-provider-adapters) when changing these rules.
-
-<a id="record-discovery-and-source-identity"></a>
-
-<a id="discovery-and-identity"></a>
 
 ### Record reading
 
@@ -227,8 +203,6 @@ An unrecognized row, an unsupported history mode, or invalid ordinals leaves the
 
 Codex's [legacy-to-paginated migration](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs) retains the header CLI version while rewriting the stored rows.
 
-<a id="selected-history-ranges"></a>
-
 ### Logical history construction
 
 Safely resolved inherited and sliced histories are used consistently by `list`, `show`, `events`, and `verify`.
@@ -256,10 +230,6 @@ Identity discovery reads the first bounded JSONL record.
 
 The `session_meta.payload.id` field is the provider-native thread identity, so moving an artifact between active and archived locations does not change its `source_ref`.
 
-<a id="version-hints-for-change-detection"></a>
-
-<a id="history-selection-and-version-hints"></a>
-
 #### Version hint
 
 The hint remains a change signal, not a verified source version.
@@ -282,15 +252,9 @@ An unresolved lineage has no hint.
 The current-artifact statistics hint uses the Codex `v0` algorithm namespace.\
 The `v0` and `v3` hint namespaces are independent of the public response schema.
 
-<a id="parent-and-fork-relationships"></a>
-
 #### Source relationships
 
 Parent and fork relationships are emitted only from explicit `parent_thread_id` and `forked_from_id` metadata.
-
-<a id="latest-source-interaction-time"></a>
-
-<a id="interaction-time-classification"></a>
 
 #### Latest interaction time
 
@@ -298,7 +262,7 @@ The latest timestamp of recognized message and tool rows becomes `last_interacti
 
 `list` and `show` stream the bounded effective history to establish interaction time.
 
-Only records in the [selected history ranges](#selected-history-ranges) contribute to this time.
+Only records in the [logical history](#logical-history-construction) contribute to this time.
 
 ##### Accepted versions and structural conditions
 
@@ -336,11 +300,7 @@ Unknown rows or variants, malformed required bookkeeping fields, and future chan
 
 Missing or invalid timestamps, uncertain rows, unresolved history, and input limits prevent a source time rather than triggering a file-time fallback.
 
-<a id="event-normalization"></a>
-
 ### Event generation
-
-<a id="canonical-event-rows"></a>
 
 #### Event row selection
 
@@ -366,10 +326,6 @@ Convert each supported event type using the following rules.
 ##### Message events
 
 Message events use the message rows selected for the history profile above.
-
-<a id="tool-names-categories-and-input"></a>
-
-<a id="tool-calls-and-event-timestamps"></a>
 
 ##### Tool call events
 
@@ -399,14 +355,6 @@ Tool call identifiers are deterministic adapter-owned hashes of the thread ident
 **Metadata**
 
 Recorded MCP `server` and dynamic `namespace` values remain provider-specific metadata when present.
-
-<a id="tool-result-bodies"></a>
-
-<a id="callresult-correlation"></a>
-
-<a id="tool-outcomes"></a>
-
-<a id="results-outcomes-and-source-relationships"></a>
 
 ##### Tool result events
 
@@ -443,20 +391,14 @@ Standalone native paginated `FunctionCallOutput` results also have unknown outco
 
 The recorded name of a standalone native paginated `FunctionCallOutput` is retained in `tool_name` metadata.
 
-<a id="provider-errors"></a>
-
 ##### Provider error events
 
 Errors are normalized from explicit provider error events.
-
-<a id="event-timestamps"></a>
 
 #### Event timestamp assignment
 
 Events use their canonical rollout row's timestamp.\
 A completed item gives its call and result the same time, not independently established start and end times.
-
-<a id="content-verification"></a>
 
 ### Verified-version calculation
 
@@ -470,14 +412,10 @@ An unsliced rollout retains the path-free evidence name `rollout/primary.jsonl`;
 
 ## Compatibility evidence
 
-<a id="official-storage-location-documentation"></a>
-
 ### Storage location evidence
 
 OpenAI's [Codex troubleshooting documentation](https://learn.chatgpt.com/ja-JP/docs/reference/troubleshooting) documents the Codex home, active session transcript location, and archived session transcript location.\
 JSONL row decoding remains an adapter-owned compatibility boundary rather than a claim that the persisted rows are a stable public API.
-
-<a id="evidence-by-format-and-version"></a>
 
 ### Internal format evidence
 

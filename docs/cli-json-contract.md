@@ -37,7 +37,7 @@ Put flags before the positional source reference.
 
 For a source listed from an explicit root, pass that root to subsequent source operations or configure the instance.\
 A source reference does not contain the root's path.\
-See [configuration](#configuration) for root selection and [Read every page](#read-the-next-page) for pagination.
+See [configuration](#configuration) for root selection and [Read every page](#read-every-page) for pagination.
 
 ## Configuration
 
@@ -107,8 +107,6 @@ Provider-neutral discovery can therefore return available providers without requ
 The `chatgpt` provider requires an explicit root.\
 The root is the exact Data Export ZIP selected by the user, not a directory to search.
 
-<a id="response-envelope"></a>
-
 ## JSON response structure
 
 ### Common fields and presence rules
@@ -153,11 +151,7 @@ The common response fields have these presence rules:
 | `omissions` | Required. It is empty for `complete`, non-empty for `partial` and `unsupported`, and may record output processing omissions for `error`. |
 | `error` | Required only for `error`; absent for every other status. |
 
-<a id="operations"></a>
-
 ### Command-specific data
-
-<a id="operation-data-and-page-objects"></a>
 
 The `data` object contains only the fields for the requested operation:
 
@@ -201,7 +195,7 @@ Cursor contents are opaque to consumers.
 The current cursor begins with `v0:`.\
 That cursor format version is independent from `schema_version`.
 
-For the retrieval procedure, see [Read every page](#read-the-next-page).
+For the retrieval procedure, see [Read every page](#read-every-page).
 
 ## Returned data types
 
@@ -240,8 +234,6 @@ The fingerprint and source reference remain available when the raw value is omit
 
 The `as0` prefix and the source fingerprint's `v0` domain separator are versioned independently from `schema_version`.\
 They do not change merely because the public response schema has reached `v2`.
-
-<a id="kind-relationships-and-metadata"></a>
 
 #### Source kinds
 
@@ -351,8 +343,6 @@ Tool names and JSON input/result keys are opaque provider-specific values, not s
 A missing recorded name is omitted and reported as `tool_name_unavailable`.\
 `category` retains broad classifications, and `action`, when present, is `execute`, `read`, `search`, `write`, `edit`, or `invoke`.
 
-<a id="outcome-and-correlation"></a>
-
 #### Tool outcomes
 
 `outcome` is `success`, `failure`, or `unknown`.\
@@ -399,8 +389,6 @@ Each chunk name and content is prefixed with its unsigned 64-bit big-endian byte
 The hash uses its own `v0` domain separator and `provider-content-v0` basis, independently from `schema_version`.\
 They change only when the hashing meaning or algorithm changes.
 
-<a id="provider-specific-information"></a>
-
 ### Source and event metadata
 
 **Entry format**
@@ -415,8 +403,6 @@ Only bounded metadata that is safe to expose without inventing a provider-neutra
 
 An adapter reports a material value that cannot be represented faithfully as an omission.\
 It does not promote an unstable provider field into the stable schema or claim `complete` by guessing an equivalent common meaning.
-
-<a id="completeness-and-omissions"></a>
 
 ## Result status and omissions
 
@@ -446,8 +432,6 @@ For `list`, multiple adapter results are aggregated independently of adapter ord
 If every observed adapter result is unsupported, the response is `unsupported`; if an unsupported omission is combined with any complete or partial observation, the response is `partial`.
 
 ## Consumer procedures
-
-<a id="read-the-next-page"></a>
 
 ### Read every page
 
@@ -591,8 +575,6 @@ For paginated operations, retry from the same cursor with a smaller `--limit`.\
 `retryable` remains false because repeating the unchanged request does not resolve the limit.\
 Reducing the page limit does not recover an individually truncated body.
 
-<a id="content-handling"></a>
-
 ## Content safety
 
 ### Unredacted content, retention, and sharing
@@ -612,8 +594,6 @@ CLI diagnostics do not unnecessarily copy underlying errors or source records.
 Underlying errors, source roots, and raw arguments are not copied into public diagnostics.
 
 ## Versions and compatibility
-
-<a id="compatibility-rule"></a>
 
 ### Response schema compatibility
 

@@ -177,7 +177,7 @@ Parsing a file successfully does not mean that the result contains all relevant 
 Distinguish useful incomplete results, recognized but unsupported observations, and failures.\
 Report omitted, truncated, unsupported, or unknown material values.\
 Never label an incomplete result as `complete` or accept an unknown format as complete.\
-The [CLI completeness rules](cli-json-contract.md#completeness-and-omissions) define statuses, pagination, and aggregation across providers.
+The [CLI completeness rules](cli-json-contract.md#result-status-and-omissions) define statuses, pagination, and aggregation across providers.
 
 **Recorded bodies**
 

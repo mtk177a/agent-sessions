@@ -15,9 +15,6 @@
 ChatGPT の設定または Privacy Portal での申請方法は、OpenAI の [エクスポートの案内](https://help.openai.com/en/articles/7260999-how-do-i-export-my-data) に従い、案内された有効期間内にダウンロードする。\
 `agent-sessions` は、エクスポートの申請、完了の定期確認、自動検出、ダウンロードを行わない。
 
-<a id="エクスポート-zip-を選ぶ"></a>
-<a id="エクスポート-zip-の指定"></a>
-
 ### 2. エクスポート ZIP を指定する
 
 各アーカイブは、名前付きソースインスタンスとして指定する。\
@@ -36,7 +33,7 @@ agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /
 
 #### 設定ファイルで指定する
 
-[設定ファイル](cli-json-contract.md#設定) に明示的な項目を追加する。\
+[設定ファイル](cli-json-contract.md#読み取り対象の設定) に明示的な項目を追加する。\
 たとえば、次のように指定する。
 
 ```json
@@ -69,9 +66,6 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 
 設定済みのインスタンスを使う場合は、設定ファイルから保存場所を取得できるため、このコマンドの `--root` を省略する。
 
-<a id="会話分岐内容"></a>
-<a id="対応する記録と制限"></a>
-
 ## 出力の読み方
 
 ### 取得したデータ
@@ -79,16 +73,11 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 `data` フィールドには、操作で要求した情報が入る。\
 以下の節では、返却するデータの種類ごとに内容を説明する。
 
-<a id="操作ごとの対応範囲"></a>
-
 #### ソース情報
 
 `list` と `show` は、会話の情報を返す。\
 選択中の分岐から最後のやり取りの時刻を確定できる場合は、`last_interaction_at` を含む。\
 確定できない場合はフィールドを省略し、`source_time_unavailable` を付けて `partial` を返す。
-
-<a id="読み取る会話の分岐"></a>
-<a id="返却する内容と取り扱い"></a>
 
 #### イベント
 
@@ -112,8 +101,6 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 
 `verify` は、ZIP 全体を対象とする検証済み内容のバージョンを返す。
 
-<a id="不完全な結果と失敗の扱い"></a>
-
 ### 処理の状態
 
 状態を示すフィールドを使って、完全な観測、不完全な観測、未対応の入力、処理の失敗を区別する。
@@ -133,8 +120,6 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 省略後に安全に使えるイベントが一つも残らない場合は、`unsupported` を返す。\
 認識できるが互換性のない JSON 構造も、不正な入力として扱わず、`unsupported` を返す。
 
-<a id="やり取りの時刻"></a>
-
 #### 省略理由を示す omissions
 
 プロバイダー固有の省略は、次のコードで説明する。
@@ -153,8 +138,6 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 
 不正な ZIP データ、不正な JSON、重複メンバー、安全でないメンバー、ソースの置換、リソース制限に関する失敗には、それぞれ異なる構造化エラーコードを付ける。\
 エラーのフィールドとコードは、共通の [エラー仕様](cli-json-contract.md#エラーと終了コード) を参照する。
-
-<a id="アーカイブの上限"></a>
 
 ## 入力の上限
 
@@ -181,8 +164,6 @@ agent-sessions events --root /fictional/chatgpt-export.zip '<source_ref from lis
 保存する内容と外部への共有は呼び出し側が決める。\
 [内容の安全な扱い](cli-json-contract.md#内容の安全な扱い) を参照する。
 
-<a id="保守者向けのアダプターの動作"></a>
-
 ## アダプターの仕様（保守者向け）
 
 OpenAI は、エクスポートの取得方法と、ZIP にチャット履歴が含まれることを文書化している。\
@@ -190,9 +171,6 @@ OpenAI は、エクスポートの取得方法と、ZIP にチャット履歴が
 そのため、正規化に使う内部メンバー名とフィールドの互換性は、アダプターで確認する。
 
 これらの規則を変えるときは、共通の [アダプターの保守上の制約](architecture.md#プロバイダーアダプターの保守) に従う。
-
-<a id="アーカイブの検証"></a>
-<a id="zip-の安全性検査"></a>
 
 ### アーカイブの読み取り
 
@@ -212,16 +190,11 @@ ZIP は、メンバーをディスクに展開せずに読む。
 - 暗号化されたメンバー。
 - シンボリックリンクと、その他の特殊な種類のメンバー。
 
-<a id="アーカイブメンバーと会話の識別"></a>
-<a id="会話の検出とソースの識別"></a>
-
 **会話 JSON の選択**
 
 デコーダーは、`conversations.json` と番号付きの `conversations-*.json` メンバーを、メンバー名による決まった順序で読み取る。
 
 ### ソース情報の生成
-
-<a id="識別と検証"></a>
 
 #### 識別情報
 
@@ -233,15 +206,10 @@ ZIP は、メンバーをディスクに展開せずに読む。
 
 ZIP を新しいエクスポートで置き換えても会話の識別子は維持できるが、スナップショットと検証済みバージョンは変わる可能性がある。
 
-<a id="変更検出用のバージョンヒント"></a>
-
 #### バージョンヒント
 
 ZIP 全体の SHA-256 が、`snapshot_hash` のバージョンヒントとなる。\
 同じスナップショットに含まれる会話は、このヒントを共有する。
-
-<a id="やり取り時刻の分類"></a>
-<a id="ソースの最後のやり取りの時刻"></a>
 
 #### 最後のやり取りの時刻
 
@@ -271,11 +239,8 @@ ZIP 全体の SHA-256 が、`snapshot_hash` のバージョンヒントとなる
 
 `list` は、該当する会話の件数を一つの省略理由にまとめる。
 
-<a id="イベントの正規化"></a>
-
 ### イベントの生成
 
-<a id="会話経路とイベントの正規化"></a>
 #### 会話経路の選択
 
 `events` では、次の順序で選択中の分岐を取り出す。
@@ -320,8 +285,6 @@ ZIP 全体の SHA-256 が、`snapshot_hash` のバージョンヒントとなる
 
 元のメッセージの `create_time` を使って、`recorded_at` を設定する。\
 値が欠落または不正な場合は、`event_time_omitted` を付けて `events` を `partial` にする。
-
-<a id="内容の検証"></a>
 
 ### 検証済みバージョンの算出
 

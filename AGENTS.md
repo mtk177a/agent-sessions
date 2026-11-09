@@ -1,160 +1,83 @@
 # AGENTS.md
 
-This file defines repository-specific instructions for agents working on `agent-sessions`.
+## Task references
 
-## Purpose
+- **Design changes**: Read [Architecture](docs/architecture.md) and the [ADRs](docs/architecture.md#architecture-decisions) related to the change.
+- **Provider changes**: Obey the [rules for provider compatibility](docs/architecture.md#provider-compatibility-maintenance) and the document for the related provider.
+- **Implementation validation**: Do the applicable [development checks](README.md#development-validation).
 
-`agent-sessions` is a public, local-first tool for read-only access to coding-agent session records across providers.
+## Architecture constraints
 
-The repository owns provider access, normalization, verification, and public contracts.\
-It does not own consumer-specific interpretation, retrospective findings, personal context, or processing state.
+Use the access layer for provider access, normalization, verification, and public contracts.\
+Keep consumer-specific interpretation and processing state with consumers.
 
-## Read first
+Keep these constraints unless an explicit architecture decision changes them:
 
-Before making a material design or implementation change, read:
+- Keep provider-owned interaction records as the raw source of truth.
+- During read-only operations, do not change provider data or metadata.\
+  Do not write persistent `agent-sessions` data during these operations.
+- Keep the tool semantically stateless by default.\
+  Do not mirror complete transcripts into an `agent-sessions` datastore.
+- A daemon, watcher, timer, or periodic synchronization process is not necessary.
+- Use a different named source instance for each independent store of the same provider.\
+  Use paths only as locators, not as stable logical identities.
+- Keep knowledge of the provider's storage layout in its adapter, not in normal user configuration.
+- Show which observations are incomplete, unsupported, or failed.
 
-1. `README.md`
-2. `docs/architecture.md`
-3. any ADR directly relevant to the change
+Keep provider-specific parsing inside its adapter.\
+Without an explicit compatibility decision, do not make unstable provider internals part of a stable public contract.
 
-Additional reading rules are:
+Before you change an invariant, examine its ADR.\
+If the decision changes, update or replace the ADR.\
+Make sure that the documentation, implementation, and tests agree with the decision.
 
-- Do not scan unrelated documentation merely to increase coverage.
-- When provider behavior materially affects a design, verify the current provider documentation or implementation rather than relying on historical assumptions.
+Without a requirement for the change, do not add provider support, compatibility layers, or configuration options.
 
-## Public information boundary
+### Read interface selection
 
-This is a public repository.
+When a documented provider interface has the necessary read-only behavior, use it as the first choice.\
+Official read operations can still write data during metadata repair, migration, or synchronization.\
+If an operation writes data, examine a safer supported path.
 
-Do not add:
+### Resource use
 
-- private repository names or links;
-- private Issue or Project references;
-- personal or employer-specific context;
-- real coding-agent session contents;
-- credentials or authentication material;
-- real usernames, hostnames, home directories, or machine-specific paths;
-- private consumer implementation details.
+- Before you add a database, persistent index, background process, hook-based ingestion path, or transcript mirror, do these checks:
+  - Make sure that observations and measurements show why the change is necessary.
+  - Examine the related ADR.
 
-Requirements learned from a private or environment-specific use case may be incorporated only after expressing them as general product requirements that stand on their own.\
-For example, it is valid to require multiple independently named Codex source instances.\
-It is not valid to document the private system or machine that originally exposed that requirement.
+- For interactive latency, do not add periodic whole-history scans or high-frequency state updates without measurements.\
+  These measurements must show that the tradeoff is necessary.
 
-## Core architecture constraints
+- Keep any future cache disposable and non-authoritative.\
+  If you delete the cache, only performance can change.
 
-Preserve the following unless an explicit architecture decision supersedes them:
+- When you change persistent I/O behavior, examine the write path.\
+  Do not use application data size to show that the writes are safe.
 
-- Provider-owned interaction records remain the raw source of truth.
-- Read-only operations do not modify provider data or metadata.
-- Read-only operations cause no persistent `agent-sessions` writes.
-- The tool is semantically stateless by default.
-- Consumer processing state does not belong in `agent-sessions`.
-- Complete transcripts are not mirrored into an `agent-sessions` datastore.
-- No daemon, watcher, timer, or periodic synchronization process is required.
-- Multiple stores for the same provider remain distinct through named source instances.
-- File system paths are locators, not stable logical identities.
-- Provider-internal storage layout belongs in provider adapters, not normal user configuration.
-- Incomplete, unsupported, and failed observation remain distinguishable.
+## Repository data
 
-Do not introduce a database, persistent index, background process, hook-based ingestion path, or transcript mirror merely because it may become useful later.\
-Such additions require an observed need, measured evidence, and review of the relevant architecture decision.
+### Public information
 
-## Disk and resource behavior
+- Do not add real session contents, credentials, or data that identifies a real machine.\
+  This includes real usernames, hostnames, home directories, and machine-specific paths.
+- Do not add private repository names or links, or private Issue or Project references.\
+  Do not add personal or employer-specific context, or private consumer implementation details.
+- Before you use a requirement from a private or environment-specific case, write it as a general product requirement.\
+  Do not include details of the original private system or machine.
 
-SSD write endurance is an explicit design concern.
+### Synthetic test data
 
-Disk and resource behavior must follow these rules:
+- Use only synthetic test data made independently of real private sessions.\
+  Do not redact real private sessions to make this data.
+- Make credential-like test values clearly fictional.
 
-- Do not add persistent writes to a read-only command.
-- Do not add periodic whole-history scans or high-frequency state updates to improve interactive latency without measured evidence that the tradeoff is necessary.
-- Any future cache must be disposable and non-authoritative.\
-  Deleting it must affect performance only.
-- When a change affects persistent I/O behavior, verify the write path directly rather than inferring safety from application-level payload size.
+## Writing rules
 
-## Provider access
+Use English for the official versions of public repository artifacts and repository rules.\
+For language choices and maintainer-created Issues and pull requests, use the [language policy](docs/localization.md).
 
-Provider access must follow these rules:
-
-- Prefer documented provider interfaces when they satisfy the repository's read-only contract.
-- Do not treat an interface as safe solely because it is official.
-- If an official read operation performs metadata repair, migration, synchronization, or another persistent mutation, evaluate a safer supported path.
-- Provider-specific parsing must remain isolated behind provider boundaries.
-- Do not expose unstable provider-internal structures as a stable public contract without an explicit compatibility decision.
-
-## Fixtures and tests
-
-Fixtures and test data must follow these rules:
-
-- Use synthetic fixtures only.
-- Synthetic fixtures should be minimal but must cover the behavior being tested, including malformed or adversarial input when relevant.
-- Do not derive committed fixtures by redacting real private sessions.\
-  Construct them independently.
-- Use obviously fictional values for credential-like test data.
-
-## Consumer boundary
-
-Do not add domain-specific concepts such as:
-
-- whether a session has been reviewed;
-- whether behavior was good or bad;
-- retrospective findings or proposals;
-- personal-memory classifications;
-- downstream workflow status.
-
-The access layer exposes source identity, source version, normalized observations, completeness, and verification evidence.\
-Consumers own the meaning applied to those observations.
-
-## Language
-
-English is the canonical language for public repository artifacts and repository rules.\
-Maintain the Japanese reference translations listed in [Localization](docs/localization.md) for comprehension and review; they do not define independent requirements or authority.\
-If the versions differ, the English version prevails.
-
-This includes:
-
-- code and identifiers;
-- code comments;
-- README and documentation;
-- ADRs;
-- CLI help and diagnostics;
-- commit-message summaries;
-- release notes;
-- repository policy files.
-
-When adding or changing a maintained English canonical file, use the repository-local `maintain-japanese-references` Skill to review its Japanese counterpart.\
-Create or update the reference in the same change when the English meaning changes.\
-When it does not, leave the reference unchanged and record the reason in the pull request's Validation or Risks / Follow-up section.\
-Do not add translations for ADRs under `docs/decisions/` as part of the maintained reference set.
-
-Maintainer workflow may use Japanese when it reduces review or decision-making cost.
-
-For maintainer-created public Issues and pull requests:
-
-- use an English title;
-- include a short English `Summary` sufficient to identify the public change;
-- use Japanese by default for the remaining body and comments, while allowing English when appropriate;
-- do not duplicate the complete body as an English/Japanese translation pair.
-
-External contributors are not required to follow the maintainer's Japanese workflow.
-
-## Change discipline
-
-Prefer the smallest change that fully satisfies the current requirement and preserves the public contracts.\
-Do not expand provider support, compatibility layers, caches, indexes, background processing, or configuration surfaces without a concrete requirement.
-
-When changing an architectural invariant:
-
-1. identify the affected decision;
-2. determine whether the existing ADR still holds;
-3. update or supersede the ADR when the decision changes;
-4. keep `README.md`, architecture documentation, implementation, and tests consistent with the accepted state.
-
-Do not add historical implementation narration to current-state documentation unless it is necessary to explain an active decision.
-
-## Validation
-
-Validation must follow these rules:
-
-- Run the narrowest deterministic checks that can demonstrate the affected contract.
-- As implementation is added, document the canonical repository validation commands here or in a dedicated contributor document rather than inventing commands per task.
-- Always inspect the final diff for accidental private information and machine-specific paths before reporting completion.
+- Use ASD-STE100 (Simplified Technical English) as a guide for English documentation.
+- Write Japanese documentation in plain form (常体).
+- When you add or change a maintained English file, use the [maintain-japanese-references Skill](.agents/skills/maintain-japanese-references/SKILL.md).
+- For maintainer-created public Issues and pull requests, do not write the full body in both English and Japanese.
+- If implementation history is not necessary to make an active design decision clear, do not include it in current-state documentation.

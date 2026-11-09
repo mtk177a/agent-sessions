@@ -173,7 +173,7 @@ Callers decide what to retain or share externally; see [content safety](cli-json
 ## Adapter specification for maintainers
 
 Rollout JSONL is a version-sensitive adapter input, not a stable public API.\
-Apply the common [adapter maintenance constraints](architecture.md#maintaining-provider-adapters) when changing these rules.
+Apply the common [adapter maintenance constraints](architecture.md#maintenance) when changing these rules.
 
 ### Record reading
 

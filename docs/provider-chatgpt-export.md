@@ -165,7 +165,7 @@ OpenAI documents export acquisition and the presence of chat history in the ZIP.
 It does not document the internal conversation JSON graph as a stable API.\
 The adapter therefore owns compatibility checks for the internal member names and fields that it uses for normalization.
 
-Apply the common [adapter maintenance constraints](architecture.md#maintaining-provider-adapters) when changing these rules.
+Apply the common [adapter maintenance constraints](architecture.md#maintenance) when changing these rules.
 
 ### Archive reading
 

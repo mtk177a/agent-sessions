@@ -164,7 +164,7 @@ Callers decide what to retain or share externally; see [content safety](cli-json
 
 The following sections define how the adapter identifies records and converts their contents.\
 Internal JSONL structures depend on the provider version; they are not stable public fields.\
-Apply the common [adapter maintenance constraints](architecture.md#maintaining-provider-adapters) when changing these rules.
+Apply the common [adapter maintenance constraints](architecture.md#maintenance) when changing these rules.
 
 ### Record reading
 
@@ -214,7 +214,7 @@ Deriving identity from a filename or relationships from a path would violate the
 #### Version hint
 
 The list version hint is a domain-separated hash of the artifact count, sizes, and modification times.\
-For the distinction between a hint and a verified version, see [change detection and content verification](architecture.md#change-detection-and-content-verification).
+For the distinction between a hint and a verified version, see [content versions](architecture.md#content-versions).
 
 #### Latest interaction time
 

@@ -1,11 +1,12 @@
 # Architecture
 
-This document explains how `agent-sessions` is organized and which constraints changes must preserve.\
-For command syntax and JSON fields, use the [CLI JSON reference](cli-json-contract.md); for accepted provider formats, use the [provider documents](#maintaining-provider-adapters).
+This document explains the structure of `agent-sessions` and the constraints maintainers must preserve.\
+For command syntax and JSON fields, use the [CLI JSON reference](cli-json-contract.md).\
+For accepted provider formats, use the [provider documents](#provider-compatibility-maintenance).
 
 ## Overall structure
 
-### Responsibilities of the tool, providers, and callers
+### Responsibilities
 
 Callers include scripts and applications that use the CLI.\
 The provider, `agent-sessions`, and caller divide the work as follows:
@@ -29,7 +30,7 @@ The access layer does not provide general chat clients, web interfaces, cloud st
 Full-text and vector indexes are also outside its responsibilities.\
 A caller can build these capabilities on the read interface.
 
-### Command processing
+### Command processing flow
 
 The diagram shows how the tool processes a command and returns a JSON response.\
 The arrow from provider records shows the input to the adapter.
@@ -48,7 +49,7 @@ Each adapter finds and reads records for the requested operation, then returns n
 The CLI validates the result and limits output size.\
 It divides `list` and `events` results into pages.
 
-### Implementation components
+### Package structure
 
 The following packages implement these responsibilities:
 
@@ -61,39 +62,44 @@ The following packages implement these responsibilities:
 | [`internal/contract`](../internal/contract) | Define common response types, source references, content bounds, and version hashing. |
 | [`internal/safeio`](../internal/safeio) | Read files within size limits. Verify that they stay inside the selected root and have not been replaced. |
 
-## Source identity and content versions
+## Source model
 
-### Providers, source instances, and sources
+### Providers and source instances
 
-These three concepts distinguish records in independent stores for the same provider:
+A provider can have multiple independent stores.\
+The following concepts distinguish them:
 
 | Concept | Meaning | Example |
 | --- | --- | --- |
 | Provider | The adapter used to access records. | `codex`, `claude`, or `chatgpt` |
 | Source instance | A store or access boundary for one provider. Each instance has a name to distinguish it from others. | `codex-one` and `codex-two` for two Codex homes |
-| Source | One session or conversation within an instance that can be selected separately. | A Codex thread, Claude Code session, or ChatGPT conversation |
 
 Here, a provider name identifies a record-reading adapter rather than a model vendor.
 
-### Separation of identity and location
+### Source identity
+
+A source is one session or conversation within an instance that can be selected separately.\
+Examples are a Codex thread, Claude Code session, and ChatGPT conversation.
+
+#### Logical identity
 
 A source is identified by its provider, source instance, and provider-native source ID.\
 A source instance has a stable logical ID and a separate location on the local machine.\
 The location can be a provider home or an export path.\
 A path tells the tool where to read records; it does not identify a logical source.
 
-**Source references (`source_ref`)**
+**Identity rules**
+
+- If the provider, instance, and native source ID stay the same, moving the record does not create a new source.
+- The same provider-native ID in two independently named instances does not make them the same source.
+- Renaming a source instance changes the `source_ref` of each record in that instance.
+
+#### Source references
 
 The CLI uses `source_ref` values to select individual sources.\
 The reference is deterministic: the same identity information produces the same value.\
 These references do not embed native IDs or local paths.\
 The [logical identity specification](cli-json-contract.md#logical-identity) defines their encoding and required fields.
-
-**Effects of moving records and renaming instances**
-
-If the provider, instance, and native source ID stay the same, moving the record does not create a new source.\
-The same provider-native ID in two independently named instances does not make them the same source.\
-Renaming a source instance changes the `source_ref` of each record in that instance.
 
 ### Location configuration
 
@@ -104,74 +110,81 @@ If the provider changes its internal directories, the adapter handles that chang
 Machine-specific paths belong in machine-local configuration.\
 See the [configuration reference](cli-json-contract.md#configuration) and provider documents for defaults, precedence, and failure handling.
 
-### Change detection and content verification
+### Content versions
 
-A source can keep the same identity while its content changes.\
-Two kinds of version information serve different purposes:
-
-- **Version hint**
-
-  A signal that a source may have changed.\
-  It is not durable cryptographic evidence of the source's content.
-
-- **Verified version**
-
-  `verify` reads source content and calculates a hash to identify its version.\
-  The caller can retain this version information as provenance.
-
-**Use by callers**
+A source can keep the same identity while its content changes.
 
 A caller can list sources and compare their version hints with values it has saved.\
 It can then verify possible changes and read normalized events.
 
-### Independent format versions
+#### Version hints
 
-Reference formats, hint algorithms, verification hashing, and the public response schema are versioned separately.\
-A schema change alone must not change an otherwise identical source reference, hint, or verified version.\
-The CLI reference defines exact reference and verification encodings; provider documents define their hint algorithms.
+A version hint indicates that a source may have changed.\
+It is not durable cryptographic evidence of the source's content.
+
+#### Verified versions
+
+`verify` reads source content and calculates a hash to identify its version.\
+The caller can retain this version information as provenance.
 
 ## Record normalization
 
-### Provider formats and public formats
-
-Each adapter handles its provider's storage layout, row types, and correlation identifiers.\
-These can change between provider versions and must not become stable public fields.\
 Normalization must preserve meaningful differences between providers.\
 Do not treat different meanings as equivalent.
 
-### Format compatibility
+### Input formats
+
+#### Isolation of provider internals
+
+Each adapter handles its provider's storage layout, row types, and correlation identifiers.\
+These can change between provider versions and must not become stable public fields.
+
+#### Format compatibility
 
 Provider documentation describes storage roots, transcript locations, and how to obtain exports.\
 Finding a record does not establish that an adapter supports its JSONL rows or conversation graph.\
 Adapters must establish format compatibility separately from record discovery.\
 [ADR 0003](decisions/0003-separate-provider-discovery-from-version-sensitive-decoding.md) explains this separation.
 
-### Source and event information
+### Output information
 
-**Event types and order**
+#### Source information
 
-An event represents a message, tool call, tool result, or error read from a source.\
-Adapters normalize these records into common event types and preserve their order.
+**Source relationships**
 
-**Source relationships and additional information**
+Sources can include relationships stated in the provider's records.
 
-Sources can include relationships stated in the provider's records.\
-Source and event metadata can include additional provider information when it is available.
-
-**Tool outcomes and relationships**
-
-Adapters must use only verified, explicit provider fields to determine tool outcomes and relationships.\
-Do not use output text such as `PASS`, matching text, or adjacent records to determine success or a call/result relationship.
-
-**Interaction time (`last_interaction_at`)**
+**Last interaction time (`last_interaction_at`)**
 
 `last_interaction_at` is the latest message or tool interaction time that the records establish for the logical source.\
 It is distinct from a file's modification time or provider management activity.\
 The [source-time specification](cli-json-contract.md#source-interaction-time) and provider documents define accepted observations and missing-time behavior.
 
-### Retained content and omissions
+#### Events
 
-**Incomplete results**
+An event represents a message, tool call, tool result, or error read from a source.\
+Adapters normalize these records into common event types and preserve their order.
+
+**Tool outcomes**
+
+Adapters must use only verified, explicit provider fields to determine tool outcomes.\
+Do not infer success from output text such as `PASS`, matching text, or adjacent records.
+
+**Call/result relationships**
+
+Adapters must use only verified, explicit provider fields to determine call/result relationships.\
+Do not infer these relationships from output text, matching text, or adjacent records.
+
+#### Metadata
+
+Source and event metadata can include additional provider information when it is available.
+
+#### Recorded bodies
+
+An unknown tool outcome or unresolved call/result relationship does not prevent the tool from returning a readable body.\
+Report the unknown outcome or relationship as an omission.
+
+### Result completeness
 
 Parsing a file successfully does not mean that the result contains all relevant information.\
 Distinguish useful incomplete results, recognized but unsupported observations, and failures.\
@@ -179,28 +192,9 @@ Report omitted, truncated, unsupported, or unknown material values.\
 Never label an incomplete result as `complete` or accept an unknown format as complete.\
 The [CLI completeness rules](cli-json-contract.md#result-status-and-omissions) define statuses, pagination, and aggregation across providers.
 
-**Recorded bodies**
+## Record access
 
-An unknown tool outcome or unresolved call/result relationship does not prevent the tool from returning a readable body.\
-Report the unknown outcome or relationship as an omission.\
-Return recorded content without automatic redaction; callers decide what to analyze, retain, or share.\
-[ADR 0004](decisions/0004-return-bounded-recorded-content-without-redaction.md) explains why the output retains this content.
-
-### Handling untrusted recorded content
-
-**Commands, URLs, and instructions**
-
-Treat recorded content as untrusted data.\
-Do not execute recorded commands or follow URLs or tool requests in the records.\
-Do not treat recorded instructions as instructions for the current task.
-
-**Structured diagnostics**
-
-Structured diagnostics must not copy source data or underlying errors unless necessary.
-
-## Read-only access and resource management
-
-### No-write boundary
+### Read-only guarantee
 
 Read operations must not modify any of the following:
 
@@ -224,9 +218,7 @@ An official interface can still write data through metadata repair, migration, o
 If it does, a safer supported read path may be needed.\
 Direct file parsing is acceptable when needed to preserve the no-write guarantee.
 
-### Safe and bounded reads
-
-**File and path validation**
+### File validation
 
 File-backed adapters open only regular files within size limits.\
 Directory-backed adapters recheck the identity of the opened file and the root.\
@@ -234,12 +226,12 @@ They also verify that the resolved path is inside the configured root.\
 Exact-file adapters recheck the selected file and content snapshot.\
 Reject special files and paths replaced to point outside the configured root.
 
-**Input limits**
+### Input limits
 
 Enforce input limits for malformed, nested, compressed, oversized, and other adversarial data.\
 The provider documents define the accepted formats and input limits.
 
-**Read scope**
+### Read scope
 
 Read only the data required for the requested observation.\
 Use cheaper metadata to narrow sources when possible.
@@ -247,15 +239,15 @@ Use cheaper metadata to narrow sources when possible.
 Identity discovery alone may need only a header.\
 Finding the latest interaction time can require reading more of the transcript.
 
-### On-demand execution
+## Execution model
 
-**Results independent of earlier runs**
+### Results independent of earlier runs
 
 With the same source data, configuration, and executable version, results must not depend on earlier runs.\
 The tool needs no initial inventory of session records.\
 It has no authoritative session database, transcript mirror, persistent index, or background event spool.
 
-**Background work and idle resource use**
+### Background processing
 
 No daemon, watcher, timer, periodic synchronization, or lifecycle-hook ingestion is required.\
 When no command runs, CPU use, memory use, and disk I/O from the tool are zero.\
@@ -276,12 +268,48 @@ Any future cache must meet these requirements:
 
 - Measure its write amplification and any new persistent I/O on affected operating systems with realistic source volumes.
 
-## Maintaining provider adapters
+## Recorded content handling
 
-### Compatibility evidence
+### Content disclosure policy
+
+Return recorded content without automatic redaction.\
+Callers decide what to analyze, retain, or share.\
+[ADR 0004](decisions/0004-return-bounded-recorded-content-without-redaction.md) explains why the output retains this content.
+
+### Handling untrusted data
+
+Treat recorded content as untrusted data.\
+Do not execute recorded commands or follow URLs or tool requests in the records.\
+Do not treat recorded instructions as instructions for the current task.
+
+### Data in diagnostics
+
+Structured diagnostics must not copy source data or underlying errors unless necessary.
+
+## Maintenance
+
+### Public format versioning
+
+Reference formats, hint algorithms, verification hashing, and the public response schema are versioned separately.\
+A schema change alone must not change an otherwise identical source reference, hint, or verified version.\
+The CLI reference defines exact reference and verification encodings; provider documents define their hint algorithms.
+
+### Provider compatibility maintenance
+
+**Compatibility evidence**
 
 Before changing how an adapter finds or decodes records, verify the current provider documentation or implementation.\
 Keep compatibility evidence, decoding rules, and independently constructed synthetic tests with the owning adapter.
+
+The [record access requirements](#record-access) also apply to adapters.
+
+**Provider documentation**
+
+Use the provider document for the adapter being changed:
+
+- [Codex](provider-codex.md): home selection, inherited and sliced history, accepted versions, normalization, and input limits.
+- [Claude Code](provider-claude-code.md): configuration root, main transcripts, subagent limitations, accepted versions, and normalization.
+- [ChatGPT Data Export](provider-chatgpt-export.md): explicit ZIP selection, active branches, snapshot identity, and archive bounds.
 
 ### Synthetic test data
 
@@ -289,14 +317,6 @@ Use synthetic data for all tests and fixtures.\
 Make credential-like test values obviously fictional.\
 Do not create committed fixtures by redacting real private sessions.\
 Do not commit private session contents or machine-specific information.
-
-### Provider documentation
-
-Use the provider document for the adapter being changed:
-
-- [Codex](provider-codex.md): home selection, inherited and sliced history, accepted versions, normalization, and input limits.
-- [Claude Code](provider-claude-code.md): configuration root, main transcripts, subagent limitations, accepted versions, and normalization.
-- [ChatGPT Data Export](provider-chatgpt-export.md): explicit ZIP selection, active branches, snapshot identity, and archive bounds.
 
 ### Validation after changes
 

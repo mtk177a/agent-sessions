@@ -170,7 +170,7 @@ If your integration uses v1, read [Migration from v1](docs/cli-json-contract.md#
   The tool does not save a transcript archive.\
   It cannot restore records that a provider has changed or deleted.
 
-See [content handling](docs/cli-json-contract.md#content-safety) and [read-only access](docs/architecture.md#read-only-access-and-resource-management) for details.
+See [content handling](docs/cli-json-contract.md#content-safety) and [read-only access](docs/architecture.md#read-only-guarantee) for details.
 
 ## Development
 
@@ -184,7 +184,7 @@ See [content handling](docs/cli-json-contract.md#content-safety) and [read-only 
 Follow the applicable rules in these references when you make changes:
 
 - [Repository instructions](AGENTS.md): contribution constraints.
-- [Maintaining provider adapters](docs/architecture.md#maintaining-provider-adapters): compatibility and input-safety requirements.
+- [Maintenance](docs/architecture.md#maintenance): compatibility and input-safety requirements.
 - [Language and Japanese references](docs/localization.md): files to maintain in both languages.
 
 Use synthetic test data only.\

@@ -17,6 +17,10 @@ agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN]
 agent-sessions verify [--config PATH] [--root PATH] <source-ref>
 ```
 
+Run `agent-sessions --version` on its own to check the executable version.\
+It prints one line to standard output, for example `agent-sessions v0.1.0`, and exits with code `0`.\
+The flag uses only the executable's build information.
+
 ### Options
 
 The options apply to the commands shown in the table.
@@ -150,7 +154,7 @@ The root is the exact Data Export ZIP selected by the user, not a directory to s
 The public response schema is stable `v2`.\
 The same contract is implemented by the production Codex, Claude Code, and ChatGPT Data Export adapters.
 
-JSON is the only automation contract; human-readable output is not implemented.
+The session commands and command-level usage errors return JSON.
 
 ### Response schema validation
 
@@ -185,7 +189,7 @@ The common response fields have these presence rules:
 | Field | Presence |
 | --- | --- |
 | `schema_version` | Required. Always `v2` for this contract. |
-| `cli_version` | Required. Identifies the executable build and may be `dev`. |
+| `cli_version` | Required. The executable version displayed by `--version`. |
 | `operation` | Required. One of `list`, `show`, `events`, `verify`, or `cli` for command-level errors. |
 | `status` | Required. One of the four [result states](#completeness). |
 | `data` | Required for `complete` and `partial` operation results; absent for `unsupported` and `error`. |
@@ -607,7 +611,7 @@ The CLI uses these exit codes:
 
 | Exit code | Meaning |
 | --- | --- |
-| `0` | `complete` or `partial` result |
+| `0` | `complete` or `partial` result, or successful `--version` output |
 | `2` | Invalid command, flag, cursor, source reference, or configuration |
 | `3` | Unsupported provider or operation |
 | `4` | Provider, I/O, verification, resource, encoding, or internal failure |
@@ -746,7 +750,12 @@ Removing or changing a required field, changing an existing field's meaning, or 
 
 ### Independent format versions
 
-`cli_version` reports the executable version and does not select the response schema.\
+The executable version is the main module version recorded by Go, such as `v0.1.0` for an installation from that tag.\
+A checkout build can report a tag or a revision-based version, with a `+dirty` suffix if Go detects uncommitted changes.\
+If Go records no module version, the executable reports `dev`.\
+An explicit version set at link time takes precedence.
+
+The response schema version is recorded separately in `schema_version`.\
 The configuration schema is separately validated and currently accepts exactly `v1`.
 
 Source references, fingerprint hashing, verification hashing, call IDs, and cursors also have versions independent from the response schema.\

@@ -42,6 +42,7 @@
 | --- | --- |
 | `README.md` | `README.ja.md` |
 | `AGENTS.md` | `AGENTS-ja.md` |
+| `CONTRIBUTING.md` | `CONTRIBUTING-ja.md` |
 | `docs/architecture.md` | `docs/ja/architecture.md` |
 | `docs/provider-chatgpt-export.md` | `docs/ja/provider-chatgpt-export.md` |
 | `docs/provider-claude-code.md` | `docs/ja/provider-claude-code.md` |

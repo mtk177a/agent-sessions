@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestWorkingDirectoryCoverageAndStateTransitions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			writeTranscript(t, home, "synthetic", testSessionID, []string{rowVersion("2.1.260", "user", `{"role":"user","content":"synthetic cd /fictional/ignored"}`, `,"cwd":"/fictional/first"`), tc.extra})
+			writeTranscript(t, home, "synthetic", testSessionID, nativeDirectoryRows([]string{rowVersion("2.1.260", "user", `{"role":"user","content":"synthetic cd /fictional/ignored"}`, `,"cwd":"/fictional/first"`), tc.extra}))
 			result := New().List(context.Background(), testSource(home))
 			w := result.Sources[0].WorkingDirectories
 			if w == nil || len(w.Locations) != tc.want || w.State != tc.state {
@@ -63,7 +64,7 @@ func TestWorkingDirectoryStateVersionAndCreationFlags(t *testing.T) {
 				rows = append(rows, rowVersion(tc.version, "user", `{"role":"user","content":"synthetic"}`, `,"cwd":"/fictional/first"`))
 			}
 			rows = append(rows, fmt.Sprintf(state, tc.flags))
-			writeTranscript(t, home, "synthetic", testSessionID, rows)
+			writeTranscript(t, home, "synthetic", testSessionID, nativeDirectoryRows(rows))
 			w := New().List(context.Background(), testSource(home)).Sources[0].WorkingDirectories
 			if w.State != tc.wantState || len(w.Locations) != tc.count {
 				t.Fatalf("%#v", w)
@@ -73,4 +74,14 @@ func TestWorkingDirectoryStateVersionAndCreationFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func nativeDirectoryRows(rows []string) []string {
+	result := append([]string{}, rows...)
+	if filepath.Separator == '\\' {
+		for i, row := range result {
+			result[i] = strings.ReplaceAll(row, "/fictional/", "C:/fictional/")
+		}
+	}
+	return result
 }

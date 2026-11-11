@@ -3,6 +3,8 @@ package codex
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mtk177a/agent-sessions/internal/contract"
@@ -27,14 +29,14 @@ func TestWorkingDirectoriesUseLogicalRowsAndKnownFields(t *testing.T) {
 			home := t.TempDir()
 			head := `{"ordinal":0,"type":"session_meta","payload":{"id":"` + testThreadID + `","cli_version":"0.153.0","history_mode":"` + tc.mode + `","cwd":"/fictional/first"` + tc.extra + `}}`
 			rows := append([]string{head}, tc.rows...)
-			writeRollout(t, rolloutPath(home, "sessions", testThreadID), rows)
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), nativeDirectoryRows(rows))
 			listed := New().List(context.Background(), testSource(home))
 			w := listed.Sources[0].WorkingDirectories
 			if w.State != tc.state || len(w.Locations) != tc.want {
 				t.Fatalf("%#v", w)
 			}
 			for _, loc := range w.Locations {
-				if loc.Path == "/fictional/copied-parent" {
+				if loc.Path == nativeDirectoryFixture("/fictional/copied-parent") {
 					t.Fatal("copied parent context leaked")
 				}
 			}
@@ -47,7 +49,7 @@ func TestWorkingDirectoryLimitPreservesUncertainty(t *testing.T) {
 	for i := 0; i < contract.MaxWorkingDirectories+1; i++ {
 		rows = append(rows, fmt.Sprintf(`{"type":"turn_context","payload":{"cwd":"/fictional/path-%d"}}`, i))
 	}
-	writeRollout(t, rolloutPath(home, "sessions", testThreadID), rows)
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), nativeDirectoryRows(rows))
 	w := New().List(context.Background(), testSource(home)).Sources[0].WorkingDirectories
 	if w.State != "partial" || len(w.Locations) != contract.MaxWorkingDirectories {
 		t.Fatalf("%#v", w)
@@ -61,10 +63,11 @@ func TestWorkingDirectoriesFollowInheritedPrefixOnly(t *testing.T) {
 		withOrdinal(1, `{"type":"turn_context","payload":{"cwd":"/fictional/inherited"}}`),
 		withOrdinal(2, `{"type":"turn_context","payload":{"cwd":"/fictional/excluded"}}`),
 	}
+	base = nativeDirectoryRows(base)
 	writeRollout(t, rolloutPath(home, "sessions", testThreadID), base)
 	cutoff := len(base[0]) + len(base[1]) + 2
-	extra := fmt.Sprintf(`,"cwd":"/fictional/selected","history_base":{"thread_id":"%s","end_ordinal_exclusive":2,"end_byte_offset":%d}`, testThreadID, cutoff)
-	writeRollout(t, rolloutPath(home, "sessions", secondThreadID), []string{withOrdinal(2, header(secondThreadID, "0.153.4", "paginated", extra)), withOrdinal(3, `{"type":"turn_context","payload":{"cwd":"/fictional/current"}}`)})
+	extra := nativeDirectoryFixture(fmt.Sprintf(`,"cwd":"/fictional/selected","history_base":{"thread_id":"%s","end_ordinal_exclusive":2,"end_byte_offset":%d}`, testThreadID, cutoff))
+	writeRollout(t, rolloutPath(home, "sessions", secondThreadID), []string{withOrdinal(2, header(secondThreadID, "0.153.4", "paginated", extra)), withOrdinal(3, nativeDirectoryFixture(`{"type":"turn_context","payload":{"cwd":"/fictional/current"}}`))})
 	shown := New().Show(context.Background(), testSource(home), contract.SourceFingerprint(secondThreadID))
 	w := shown.Sources[0].WorkingDirectories
 	if w.State != "complete" {
@@ -74,7 +77,23 @@ func TestWorkingDirectoriesFollowInheritedPrefixOnly(t *testing.T) {
 	for _, location := range w.Locations {
 		got[location.Path] = true
 	}
-	if !got["/fictional/inherited"] || !got["/fictional/selected"] || !got["/fictional/current"] || got["/fictional/excluded"] || got["/fictional/base-header"] {
+	if !got[nativeDirectoryFixture("/fictional/inherited")] || !got[nativeDirectoryFixture("/fictional/selected")] || !got[nativeDirectoryFixture("/fictional/current")] || got[nativeDirectoryFixture("/fictional/excluded")] || got[nativeDirectoryFixture("/fictional/base-header")] {
 		t.Fatal(got)
 	}
+}
+
+// Synthetic provider paths must be absolute on the host that runs the test.
+// Keep this conversion before history byte boundaries are calculated.
+func nativeDirectoryFixture(value string) string {
+	if filepath.Separator == '\\' {
+		return strings.ReplaceAll(value, "/fictional/", "C:/fictional/")
+	}
+	return value
+}
+func nativeDirectoryRows(rows []string) []string {
+	result := make([]string, len(rows))
+	for i, row := range rows {
+		result[i] = nativeDirectoryFixture(row)
+	}
+	return result
 }

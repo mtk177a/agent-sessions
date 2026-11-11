@@ -2,14 +2,16 @@ package contract
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestWorkingDirectoriesBoundsAndValidation(t *testing.T) {
+	first := filepath.Join(t.TempDir(), "first")
 	w := NewWorkingDirectories()
-	w.Add(WorkingDirectory{Path: "/fictional/first", Evidence: "turn"})
-	w.Add(WorkingDirectory{Path: "/fictional/first", Evidence: "turn"})
+	w.Add(WorkingDirectory{Path: first, Evidence: "turn"})
+	w.Add(WorkingDirectory{Path: first, Evidence: "turn"})
 	if len(w.Locations) != 1 || ValidateWorkingDirectories(w) != nil {
 		t.Fatal(w)
 	}
@@ -23,8 +25,8 @@ func TestWorkingDirectoriesBoundsAndValidation(t *testing.T) {
 	if err := EnforceBounds(&e); !errors.Is(err, ErrStructuralStringBound) {
 		t.Fatalf("path was truncated: %v", err)
 	}
-	w.Locations[0].Path = "/fictional/first"
-	w.Locations[0].Repository = &RepositoryMembership{State: "unknown", CommonDir: "/fictional/repo", Reason: "conflicting_evidence"}
+	w.Locations[0].Path = first
+	w.Locations[0].Repository = &RepositoryMembership{State: "unknown", CommonDir: filepath.Join(t.TempDir(), "repo"), Reason: "conflicting_evidence"}
 	if ValidateWorkingDirectories(w) == nil {
 		t.Fatal("unknown association retained a resolved identity")
 	}

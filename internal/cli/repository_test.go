@@ -262,7 +262,9 @@ func treeSnapshot(t *testing.T, root string) map[string]string {
 		if err != nil {
 			return err
 		}
-		info, err := d.Info()
+		// Query current attributes directly; directory-enumeration attributes can
+		// be stale after fixture creation on Windows.
+		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
@@ -312,6 +314,16 @@ func TestRepositoryOperationsPreserveProviderAndGitTrees(t *testing.T) {
 		t.Fatal("search changed event indices, bodies or verification")
 	}
 	if after := treeSnapshot(t, base); !reflect.DeepEqual(before, after) {
+		for path, entry := range after {
+			if before[path] != entry {
+				t.Errorf("snapshot changed %q: before=%q after=%q", path, before[path], entry)
+			}
+		}
+		for path := range before {
+			if _, exists := after[path]; !exists {
+				t.Errorf("snapshot removed %q", path)
+			}
+		}
 		t.Fatal("read operations changed provider or Git file set, mode, size, modification time or bytes")
 	}
 }

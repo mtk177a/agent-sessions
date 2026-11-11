@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestLookupLimitKeepsCandidateUnknown(t *testing.T) {
 		resolver.cache[string(rune(i))] = unknown("directory_unavailable")
 	}
 	source := contract.Source{WorkingDirectories: contract.NewWorkingDirectories()}
-	source.WorkingDirectories.Add(contract.WorkingDirectory{Path: "/fictional/not-looked-up", Evidence: "turn"})
+	source.WorkingDirectories.Add(contract.WorkingDirectory{Path: filepath.Join(t.TempDir(), "not-looked-up"), Evidence: "turn"})
 	if resolver.Observe(&source) != "unknown" || Uncertainty(source) != "git_lookup_limit" {
 		t.Fatal(source.WorkingDirectories)
 	}

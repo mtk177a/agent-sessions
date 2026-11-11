@@ -87,12 +87,20 @@ It does not create or update that file.
 
 #### Configuration structure
 
-Configuration uses strict JSON with its own `schema_version: v1`.
+The configuration file contains one JSON object.\
+The object can have a `sources` array.\
+If `sources` is absent, an empty array, or `null`, the file defines no instances.\
+Unknown fields in the configuration object or a source entry are rejected.
 
 #### Value constraints
 
-Provider and source instance IDs match `[a-z][a-z0-9-]{0,62}`.\
-Source instance IDs are unique within one provider, roots are absolute, and unknown fields are rejected.
+Each `sources` entry is an object with three required string fields.
+
+| Field | Value |
+| --- | --- |
+| `id` | Source instance ID. Matches `[a-z][a-z0-9-]{0,62}` and is unique within the provider. |
+| `provider` | Provider ID. Matches `[a-z][a-z0-9-]{0,62}`. |
+| `root` | Absolute path to the provider's store or export. |
 
 #### Configuration example
 
@@ -100,7 +108,6 @@ The following example configures two independent Codex homes.
 
 ```json
 {
-  "schema_version": "v1",
   "sources": [
     {"id": "codex-one", "provider": "codex", "root": "/fictional/codex-one"},
     {"id": "codex-two", "provider": "codex", "root": "/fictional/codex-two"}
@@ -147,17 +154,14 @@ The root is the exact Data Export ZIP selected by the user, not a directory to s
 
 ## JSON response structure
 
-The public response schema is stable `v2`.\
-The same contract is implemented by the production Codex, Claude Code, and ChatGPT Data Export adapters.
+The CLI uses one JSON response format for all providers.
 
 JSON is the only automation contract; human-readable output is not implemented.
 
 ### Response schema validation
 
-A consumer must read and validate `schema_version` before interpreting `data` or any other version-dependent field.\
-A consumer that implements this contract accepts `v2` and rejects an unknown major version.
-
-After accepting the schema major, consumers must ignore unknown response fields.
+Use the field requirements below to interpret the response.\
+Consumers must ignore unknown response fields.
 
 ### Common response fields
 
@@ -165,7 +169,6 @@ The following is the smallest complete `list` response:
 
 ```json
 {
-  "schema_version": "v2",
   "cli_version": "dev",
   "operation": "list",
   "status": "complete",
@@ -184,7 +187,6 @@ The common response fields have these presence rules:
 
 | Field | Presence |
 | --- | --- |
-| `schema_version` | Required. Always `v2` for this contract. |
 | `cli_version` | Required. Identifies the executable build and may be `dev`. |
 | `operation` | Required. One of `list`, `show`, `events`, `verify`, or `cli` for command-level errors. |
 | `status` | Required. One of the four [result states](#completeness). |
@@ -233,8 +235,7 @@ A `page` object requires integer `limit` and Boolean `has_more`.\
 
 Cursor contents are opaque to consumers.
 
-The current cursor begins with `v0:`.\
-That cursor format version is independent from `schema_version`.
+The current cursor begins with `v0:`.
 
 For the retrieval procedure, see [Read every page](#read-every-page).
 
@@ -275,13 +276,12 @@ The `identity` object requires `provider`, `source_instance`, `provider_source_f
 Its optional `provider_native_source_id` contains the provider-owned logical ID within the output bound.\
 The fingerprint and source reference remain available when the raw value is omitted.
 
-The `as0` prefix and the source fingerprint's `v0` domain separator are versioned independently from `schema_version`.\
-They do not change merely because the public response schema has reached `v2`.
+The `as0` prefix and the source fingerprint's `v0` domain separator identify their respective formats.
 
 #### Source kinds
 
 Source `kind` is an extensible token; the currently emitted values are `session` for Codex and Claude Code records and `conversation` for ChatGPT Data Export conversations.\
-Consumers must not reject an otherwise valid `v2` response solely because a source uses an unrecognized `kind` token.
+Consumers must accept otherwise valid responses with an unrecognized source `kind` token.
 
 #### Source relationships
 
@@ -505,7 +505,7 @@ The current values use `sha256`, `provider-content-v0`, and a `sha256:`-prefixed
 The verified version is SHA-256 over a domain separator followed by name-sorted evidence chunks.\
 Each chunk name and content is prefixed with its unsigned 64-bit big-endian byte length, and duplicate chunk names are rejected.
 
-The hash uses its own `v0` domain separator and `provider-content-v0` basis, independently from `schema_version`.\
+The hash uses the `v0` domain separator and `provider-content-v0` basis.\
 They change only when the hashing meaning or algorithm changes.
 
 ### Metadata
@@ -598,8 +598,8 @@ The current error codes are:
 - `response_limit_exceeded`.
 - `invalid_result`.
 
-Omission and error code sets may grow within `v2`.\
-After accepting `schema_version`, consumers must preserve the declared incomplete or error state when they encounter an unknown code instead of treating the result as complete.
+Omission and error code sets may grow.\
+Consumers must preserve the declared incomplete or error state when they encounter an unknown code.
 
 ### Exit codes
 
@@ -690,10 +690,9 @@ For `list` and `events`, keep the same source selection for every request, inclu
 
 Follow these steps to read the pages:
 
-1. Validate `schema_version` before interpreting version-dependent fields.
-2. Inspect `status` and `omissions`, and read any available operation data.
-3. If `page.has_more` is `true`, pass `page.next_cursor` unchanged to the same operation.
-4. Continue until `has_more` is `false`, retaining omissions from all pages.
+1. Inspect `status` and `omissions`, and read any available operation data.
+2. If `page.has_more` is `true`, pass `page.next_cursor` unchanged to the same operation.
+3. Continue until `has_more` is `false`, retaining omissions from all pages.
 
 Use the returned cursor in these command forms:
 
@@ -723,43 +722,18 @@ For a fixed lookback period, select sources as follows:
 
 A partial listing, including a missing source time or an unfinished page, cannot establish that the selected sources are exhaustive.
 
-### Updating a v1 consumer
+### Upgrade an existing integration
 
-See [Changes from v1](#changes-from-v1) for changed fields and content handling.
+Before switching to an executable that uses the current formats, update the configuration and the response reader together.
 
-Before updating the pinned executable, complete these steps:
+1. Remove the top-level `"schema_version": "v1"` field from each configuration file you use.\
+   The current CLI rejects this field as unknown.
+2. Remove checks for the presence of `schema_version` or the value `v2` from response readers and validators.\
+   Use the [common response fields](#common-response-fields) to process both successful and error responses.
 
-1. Make the consumer accept v2 and read input and result content.
-2. Handle unknown values and omissions.
-3. Review retention and sharing.
+## Independent format versions
 
-**Previous executable**
+`cli_version` reports the executable version.
 
-Keep or restore the previous executable when v1 is required or integration fails.
-
-## Versioning
-
-### Response schema change rules
-
-Additive optional fields may be introduced within `v2`.\
-Removing or changing a required field, changing an existing field's meaning, or incompatibly changing a status, event kind, exit code, logical identity rule, or other required semantic requires a new major schema version.
-
-### Independent format versions
-
-`cli_version` reports the executable version and does not select the response schema.\
-The configuration schema is separately validated and currently accepts exactly `v1`.
-
-Source references, fingerprint hashing, verification hashing, call IDs, and cursors also have versions independent from the response schema.\
+Source references, fingerprint hashing, verification hashing, call IDs, and cursors have their own format versions.\
 Their formats are defined in [Logical identity](#logical-identity), [Verified-version encoding](#verified-version-encoding), [Call/result relationships](#callresult-relationships), and [Page information](#page-information).
-
-### Changes from v1
-
-**Changed behavior**
-
-v2 removes automatic redaction guarantees and represents inputs, results, unknown outcomes, and unresolved correlations.\
-`success`, `excerpt`, `redacted`, and `evidence_state` are replaced by the new fields; `input_state: withheld` becomes `available` with actual `input`.\
-The new executable has no v1 output mode.
-
-**Unchanged formats**
-
-Configuration `schema_version: v1`, commands and arguments, source references, and verification hashing are unchanged.

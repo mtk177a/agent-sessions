@@ -1,7 +1,7 @@
 # ChatGPT Data Export provider
 
 Use this document to read a saved ChatGPT Data Export ZIP with the `chatgpt` adapter and understand its output.\
-For common `v2` JSON fields, see the [CLI reference](cli-json-contract.md).
+For common JSON response fields, see the [CLI reference](cli-json-contract.md).
 
 ## Usage procedure
 
@@ -34,7 +34,6 @@ For example:
 
 ```json
 {
-  "schema_version": "v1",
   "sources": [
     {
       "id": "chatgpt-personal",

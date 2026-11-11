@@ -3,7 +3,7 @@
 Use this document to read saved session records with the `codex` adapter and understand its output.\
 The adapter reads saved rollouts without starting the Codex App Server.
 
-For common `v2` JSON fields, see the [CLI reference](cli-json-contract.md).
+For common JSON response fields, see the [CLI reference](cli-json-contract.md).
 
 ## Usage procedure
 
@@ -49,7 +49,6 @@ For example:
 
 ```json
 {
-  "schema_version": "v1",
   "sources": [
     {
       "id": "codex-records",

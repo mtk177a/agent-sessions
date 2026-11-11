@@ -7,7 +7,7 @@
 この文書では、`codex` アダプターで保存済みのセッション記録を読み取る方法と、出力の読み方を説明する。\
 アダプターは、Codex App Server を起動せずに保存済みロールアウトを読み取る。
 
-共通の `v2` JSON フィールドは [CLI 仕様](cli-json-contract.md) を参照する。
+JSON 応答の共通フィールドは [CLI 仕様](cli-json-contract.md) を参照する。
 
 ## 利用手順
 
@@ -53,7 +53,6 @@ agent-sessions list --provider codex --root /fictional/codex-home
 
 ```json
 {
-  "schema_version": "v1",
   "sources": [
     {
       "id": "codex-records",

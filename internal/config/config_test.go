@@ -1,51 +1,53 @@
 package config
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestLoadRejectsDuplicateAndUnknownSources(t *testing.T) {
-	dir := t.TempDir()
-	duplicate := filepath.Join(dir, "duplicate.json")
-	duplicateData, err := json.Marshal(Config{SchemaVersion: SchemaVersion, Sources: []Source{
-		{ID: "demo", Provider: "synthetic", Root: filepath.Join(dir, "a")},
-		{ID: "demo", Provider: "synthetic", Root: filepath.Join(dir, "b")},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(duplicate, duplicateData, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(duplicate, true); err == nil {
-		t.Fatal("duplicate source was accepted")
-	}
-
-	unknown := filepath.Join(dir, "unknown.json")
-	if err := os.WriteFile(unknown, []byte(`{"schema_version":"v1","extra":true,"sources":[]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(unknown, true); err == nil {
-		t.Fatal("unknown field was accepted")
+func TestLoadAcceptsConfigWithoutSources(t *testing.T) {
+	for _, data := range []string{`{}`, `{"sources":[]}`, `{"sources":null}`} {
+		t.Run(data, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			configured, err := Load(path, true)
+			if err != nil || len(configured.Sources) != 0 {
+				t.Fatalf("Load() = %#v, %v; want empty sources", configured, err)
+			}
+		})
 	}
 }
 
-func TestLoadRejectsUnsupportedSchemaVersions(t *testing.T) {
-	for _, version := range []string{"v0alpha1", "v2"} {
-		t.Run(version, func(t *testing.T) {
+func TestLoadRejectsInvalidConfiguration(t *testing.T) {
+	root := t.TempDir()
+	source := fmt.Sprintf(`{"id":"demo","provider":"synthetic","root":%q}`, root)
+	for _, tc := range []struct {
+		name    string
+		data    string
+		wantErr string
+	}{
+		{"legacy schema version", `{"schema_version":"v1","sources":[]}`, `unknown field "schema_version"`},
+		{"unknown configuration field", `{"sources":[],"extra":true}`, `unknown field "extra"`},
+		{"unknown source field", `{"sources":[{"extra":true}]}`, `unknown field "extra"`},
+		{"null configuration", `null`, "configuration must be a JSON object"},
+		{"non-array sources", `{"sources":{}}`, "cannot unmarshal object"},
+		{"missing ID", fmt.Sprintf(`{"sources":[{"provider":"synthetic","root":%q}]}`, root), "invalid provider or source instance identifier"},
+		{"invalid provider", fmt.Sprintf(`{"sources":[{"id":"demo","provider":"Synthetic","root":%q}]}`, root), "invalid provider or source instance identifier"},
+		{"relative root", `{"sources":[{"id":"demo","provider":"synthetic","root":"relative"}]}`, "source root must be absolute"},
+		{"duplicate source", `{"sources":[` + source + `,` + source + `]}`, "duplicate source instance"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
-			data, err := json.Marshal(Config{SchemaVersion: version, Sources: []Source{}})
-			if err != nil {
+			if err := os.WriteFile(path, []byte(tc.data), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(path, data, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := Load(path, true); err == nil {
-				t.Fatalf("schema version %q was accepted", version)
+			if _, err := Load(path, true); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Load() error = %v; want %q", err, tc.wantErr)
 			}
 		})
 	}

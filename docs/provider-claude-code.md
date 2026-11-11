@@ -3,7 +3,7 @@
 Use this document to read saved session records with the `claude` adapter and understand its output.\
 The adapter reads records directly without starting Claude Code.
 
-For common `v2` JSON fields, see the [CLI reference](cli-json-contract.md).
+For common JSON response fields, see the [CLI reference](cli-json-contract.md).
 
 ## Usage procedure
 
@@ -49,7 +49,6 @@ For example:
 
 ```json
 {
-  "schema_version": "v1",
   "sources": [
     {
       "id": "claude-records",

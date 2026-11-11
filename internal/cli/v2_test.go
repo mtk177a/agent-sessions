@@ -57,7 +57,7 @@ func TestEventsBoundedContentAndPagination(t *testing.T) {
 		if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
 			t.Fatal(err)
 		}
-		if envelope.Status != contract.StatusPartial || envelope.SchemaVersion != "v2" {
+		if envelope.Status != contract.StatusPartial {
 			t.Fatal("invalid state")
 		}
 		collected = append(collected, (*envelope.Data.Events)...)
@@ -100,10 +100,7 @@ func TestResponseLimitCanBeRetriedFromSameCursor(t *testing.T) {
 	if exit := runner.Run(t.Context(), []string{"events", "--root", root, "--limit", "30", ref}, &output); exit != ExitFailure {
 		t.Fatal("oversized response was accepted")
 	}
-	var envelope contract.Envelope
-	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
-		t.Fatal(err)
-	}
+	envelope := decodeCurrentResponse(t, output.Bytes())
 	if envelope.Error == nil || envelope.Error.Code != "response_limit_exceeded" || len(output.Bytes()) > MaxResponseBytes {
 		t.Fatal("incorrect response limit error")
 	}

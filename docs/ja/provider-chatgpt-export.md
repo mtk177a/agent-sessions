@@ -5,7 +5,7 @@
 > 内容に差異がある場合は英語版を優先する。
 
 この文書では、`chatgpt` アダプターで保存済みの ChatGPT Data Export ZIP を読み取る方法と、出力の読み方を説明する。\
-共通の `v2` JSON フィールドは [CLI 仕様](cli-json-contract.md) を参照する。
+JSON 応答の共通フィールドは [CLI 仕様](cli-json-contract.md) を参照する。
 
 ## 利用手順
 
@@ -38,7 +38,6 @@ agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /
 
 ```json
 {
-  "schema_version": "v1",
   "sources": [
     {
       "id": "chatgpt-personal",

@@ -62,6 +62,9 @@ A single truncated body has no continuation operation.
 
 ### Transition to v2
 
+This section records the earlier transition from v1 to v2.\
+See the [CLI JSON reference](../cli-json-contract.md) for the current formats.
+
 #### Executable replacement
 
 v2 replaces v1 rather than silently weakening its guarantees.\
@@ -77,9 +80,9 @@ Consumer updates must include:
 - support for the new input/result fields;
 - unknown/omission handling.
 
-#### Independent versioning
+#### Formats and rules retained in the transition
 
-The following remain independently versioned and unchanged:
+The v1-to-v2 transition retained these formats and rules:
 
 - Configuration.
 - Source identity.

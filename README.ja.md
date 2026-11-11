@@ -144,8 +144,7 @@ agent-sessions list --repository /fictional/project
 
 ### JSON 応答を処理する
 
-すべてのコマンドは、安定した `v2` 応答スキーマの JSON オブジェクトを一つ返す。\
-ほかの応答フィールドを解釈する前に、`schema_version` が `v2` であることを確認する。
+すべてのコマンドは、[現行の応答形式](docs/ja/cli-json-contract.md#json-応答の構成) に従って JSON オブジェクトを一つ返す。
 
 結果の完全性と後続ページの有無は、次のフィールドで確認する。
 
@@ -167,7 +166,7 @@ agent-sessions list --repository /fictional/project
 - 未対応の内容や形式は明示的に報告する。
 - 切り詰められたメッセージやツールの本文の残りは、ページ分割では取得できない。
 
-v1 を使う連携処理を更新する場合は、更新前に [呼び出し側の更新手順](docs/ja/cli-json-contract.md#v1-対応の呼び出し側を更新する) を読む。
+設定ファイルや応答を読む処理で `schema_version` を使っている場合は、[既存の連携処理の更新手順](docs/ja/cli-json-contract.md#既存の連携処理を更新する) に従う。
 
 ### 取得した内容を扱う
 

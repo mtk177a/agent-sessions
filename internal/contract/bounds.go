@@ -24,6 +24,11 @@ func EnforceBounds(envelope *Envelope) error {
 	changed = boundString(&envelope.CLIVersion) || changed
 
 	if envelope.Data != nil {
+		if envelope.Data.Repository != nil {
+			if err := requireBoundedString(envelope.Data.Repository.CommonDir); err != nil {
+				return err
+			}
+		}
 		if envelope.Data.Sources != nil {
 			for i := range *envelope.Data.Sources {
 				bounded, err := boundSource(&(*envelope.Data.Sources)[i])
@@ -67,6 +72,9 @@ func EnforceBounds(envelope *Envelope) error {
 		}
 	}
 	for i := range envelope.Omissions {
+		if err := requireBoundedString(envelope.Omissions[i].Reason); err != nil {
+			return err
+		}
 		if err := requireBoundedString(envelope.Omissions[i].Code); err != nil {
 			return err
 		}
@@ -102,6 +110,37 @@ func EnforceBounds(envelope *Envelope) error {
 
 func boundSource(source *Source) (bool, error) {
 	changed := false
+	if w := source.WorkingDirectories; w != nil {
+		// Paths are evidence. Never truncate them into different locations.
+		if len(w.Locations) > MaxWorkingDirectories {
+			w.Locations = w.Locations[:MaxWorkingDirectories]
+			w.Incomplete("directory_limit")
+			changed = true
+		}
+		if len(w.Reasons) > MaxMetadata {
+			w.Reasons = w.Reasons[:MaxMetadata]
+			changed = true
+		}
+		for _, value := range append([]string{w.State}, w.Reasons...) {
+			if err := requireBoundedString(value); err != nil {
+				return false, err
+			}
+		}
+		for _, location := range w.Locations {
+			values := []string{location.Path, location.Evidence}
+			if m := location.Mapping; m != nil {
+				values = append(values, m.OriginalPath, m.PreviousPath, m.Kind)
+			}
+			if r := location.Repository; r != nil {
+				values = append(values, r.State, r.CommonDir, r.Basis, r.Reason)
+			}
+			for _, value := range values {
+				if err := requireBoundedString(value); err != nil {
+					return false, err
+				}
+			}
+		}
+	}
 	if len(source.Metadata) > MaxMetadata {
 		source.Metadata = source.Metadata[:MaxMetadata]
 		changed = true

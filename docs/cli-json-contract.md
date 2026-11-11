@@ -11,7 +11,7 @@ Provider-specific roots, accepted formats, and input limits are documented for [
 Use these command forms.
 
 ```text
-agent-sessions list [--config PATH] [--provider ID [--source-instance ID] [--root PATH]] [--limit N] [--cursor TOKEN]
+agent-sessions list [--config PATH] [--provider ID [--source-instance ID] [--root PATH]] [--repository PATH] [--limit N] [--cursor TOKEN]
 agent-sessions show [--config PATH] [--root PATH] <source-ref>
 agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
 agent-sessions verify [--config PATH] [--root PATH] <source-ref>
@@ -27,6 +27,7 @@ The options apply to the commands shown in the table.
 | `--provider ID` | `list` | Select one provider; absent means combine available providers. |
 | `--source-instance ID` | `list`, with `--provider` | Select one named store or export boundary. |
 | `--root PATH` | All operations; requires `--provider` for `list` | Override the provider-level root for this invocation. |
+| `--repository PATH` | `list` | Select a local Git repository, including its linked worktrees; independent of the provider record root. |
 | `--limit N` | `list`, `events` | Set page size; default 50, maximum 100. |
 | `--cursor TOKEN` | `list`, `events` | Continue with the opaque cursor returned by the previous page. |
 
@@ -40,6 +41,37 @@ Put flags before the positional source reference.
 For a source listed from an explicit root, pass that root to subsequent source operations or configure the instance.\
 A source reference does not contain the root's path.\
 See [configuration](#configuration) for root selection and [Read every page](#read-every-page) for pagination.
+
+### Find sessions for a local Git repository
+
+```sh
+agent-sessions list --repository /fictional/project
+```
+
+`PATH` selects an existing repository root, worktree, or subdirectory.\
+Relative command-line paths are resolved from the invocation directory.\
+Git must be available on `PATH` and support `rev-parse --path-format=absolute` and `worktree list --porcelain -z`.\
+An unavailable target, Git executable, or target registration listing returns `invalid_repository` with exit code `2`.
+
+The command compares normalized Git common administration directories.\
+It does not merge independent clones by remote URL, branch, or commit, and it resolves nested repositories separately.\
+A source matches when at least one recorded working directory resolves to the selected repository.\
+Multiple matching observations produce one source; its events still include the entire supported conversation.
+
+Filtering occurs before source-reference sorting and pagination.\
+Keep the repository, record roots, configuration, and source snapshot unchanged between pages.\
+`data.repository.common_dir` gives the resolved query target; it is a local locator, not a stable source identity.
+
+Unresolved candidates are excluded from `data.sources` and counted in `repository_membership_unknown` omissions with scope `repository`.\
+The optional token `reason` explains each group, and `count` counts candidates, not paths.\
+A candidate with several gaps is counted once, with one of its reasons.\
+These counts cover the full candidate set on every page and are separate from pagination omissions.\
+A matching source with additional gaps remains included and produces `repository_evidence_incomplete`, also grouped by reason.\
+Either omission makes the search `partial`, including the last page.\
+An empty partial result does not establish that no matching conversation exists.
+
+Reasons include `directory_unavailable`, `invalid_directory`, `git_unavailable`, `mapping_unavailable`, `conflicting_evidence`, `history_unavailable`, `ambiguous_artifact`, `unsupported_directory_record`, `invalid_directory_record`, `unsupported_provider`, `directory_limit`, and `git_lookup_limit`.\
+Discovery, source-time, and other existing omissions remain in the response even when a source is filtered out.
 
 ## Configuration
 
@@ -218,7 +250,7 @@ A source instance is its named provider store or export boundary.
 #### Common fields
 
 Each source requires `identity`, `kind`, `relationships`, and `metadata`.\
-`version_hint`, `last_interaction_at`, and `identity.provider_native_source_id` are optional; all other identity fields are required.
+`working_directories`, `version_hint`, `last_interaction_at`, and `identity.provider_native_source_id` are optional; all other identity fields are required.
 
 #### Logical identity
 
@@ -285,6 +317,56 @@ Such absence adds `source_time_unavailable` with `scope: source` and makes `list
 **ChatGPT active branch**
 
 For ChatGPT Data Export, the selected active branch defines the interactions considered; other branches do not advance this field.
+
+#### Recorded working directories
+
+`list` and `show` can return optional `working_directories`.\
+Absence means that this observation is unsupported, not that the source worked in no repository.\
+This object has required `state`, `locations`, and `reasons` fields; both arrays can be empty.\
+`state` is `complete`, `partial`, or `unsupported` and describes extraction of recorded directory evidence.\
+`partial` and `unsupported` require token reasons; `complete` has no reasons.\
+A complete extraction does not prove that every actual directory change was recorded.
+
+Each location has these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `path` | The recorded absolute directory after provider-specific path decoding, without truncation or inference from text. |
+| `evidence` | `session`, `turn`, `tool`, `interaction`, or `worktree`: the normalized kind of recorded evidence. |
+| `mapping` (optional) | Recorded worktree relationship: required `original_path` and `kind`, and optional `previous_path`. The kind is `git_created`, `existing`, `hook`, or `unknown`. |
+| `repository` (optional) | Local resolution: required `state`, either `resolved` or `unknown`. |
+
+A resolved repository requires `common_dir` and `basis`, with no `reason`.\
+The basis is `current_git`, `git_registration`, or `provider_mapping`.\
+An unknown repository requires a token `reason` and has no `common_dir` or `basis`.\
+Provider results can omit resolution; CLI `list` and `show` resolve the returned locations.
+
+Current Git resolution uses the nearest repository and resolves symbolic links in administration paths.\
+It is evidence about the current filesystem, not proof of historical membership.\
+Moves, undetected path reuse, and records copied from another environment cannot be reconstructed from paths alone.\
+When available evidence conflicts, the location remains unknown; the CLI does not choose one association.\
+A conflict at one path invalidates other associations at that same path within the source, but does not discard independent matching locations.
+
+For an absent worktree root, a remaining registration in the query repository can establish membership.\
+This fallback requires the exact root path; an absent descendant could have contained a separate nested repository.\
+`show` has no query repository and therefore does not search its registrations.\
+A verified provider mapping for normal Git creation can resolve an absent root from its original directory, provided that any recorded previous directory also resolves to the same repository.\
+If the original or previous directory cannot be resolved, membership established by current Git evidence or a remaining registration still applies.\
+Existing-worktree entry and Hook creation never establish that relationship by themselves.\
+An existing path with conflicting or unusable administration is not recovered as a deleted worktree.\
+Unrecoverable locations stay unknown.
+
+There are at most 256 distinct directory observations per source and 4,096 uncached Git directory lookups per invocation.\
+Further observations or lookups remain incomplete.\
+Each Git read has a five-second timeout and a 1 MiB stdout limit.\
+Paths and structural fields are never shortened into different identities.
+
+Without `--repository`, the envelope status retains its existing source-metadata meaning.\
+Examine `working_directories.state`, `reasons`, and each `repository.state` for this optional observation.\
+With the filter, uncertainty also affects the envelope as specified in [repository search](#find-sessions-for-a-local-git-repository).\
+Directory evidence does not change source references, hints, event indexes, or verified provider-content versions.\
+Git metadata used for resolution is not part of `verify` evidence.\
+Directory paths and Git administration paths can disclose private information and are not redacted.
 
 ### Events
 
@@ -466,6 +548,7 @@ Pagination with `has_more: true` returns `partial`, an omission with code `pagin
 
 #### Omissions
 
+Each omission can include an optional token-valued `reason`.\
 Every omission requires token-valued `code` and `scope` plus a safe human-readable `message`.\
 The optional positive integer `count` reports how many known items that omission represents; its absence does not imply zero affected provider values.
 
@@ -496,6 +579,7 @@ The current error codes are:
 - `invalid_pagination`.
 - `invalid_cursor`.
 - `invalid_source_ref`.
+- `invalid_repository`.
 - `source_resolution_failed`.
 - `config_path_unavailable`.
 - `invalid_configuration`.

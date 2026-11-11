@@ -14,6 +14,7 @@ import (
 	"github.com/mtk177a/agent-sessions/internal/config"
 	"github.com/mtk177a/agent-sessions/internal/contract"
 	"github.com/mtk177a/agent-sessions/internal/provider"
+	"github.com/mtk177a/agent-sessions/internal/repository"
 )
 
 const (
@@ -59,6 +60,7 @@ func (r Runner) Run(ctx context.Context, args []string, output io.Writer) int {
 
 func (r Runner) runList(ctx context.Context, args []string, output io.Writer) int {
 	flags := newFlagSet("list")
+	repositoryPath := flags.String("repository", "", "local Git repository")
 	configPath := flags.String("config", "", "configuration file")
 	providerName := flags.String("provider", "", "provider")
 	instance := flags.String("source-instance", "", "source instance")
@@ -71,6 +73,10 @@ func (r Runner) runList(ctx context.Context, args []string, output io.Writer) in
 	offset, err := parsePage(*limit, *cursor)
 	if err != nil {
 		return r.writeError(output, "list", ExitUsage, "invalid_pagination", "usage", "The pagination arguments are invalid.")
+	}
+	resolver, err := repository.New(ctx, *repositoryPath)
+	if err != nil {
+		return r.writeError(output, "list", ExitUsage, "invalid_repository", "usage", "The local Git repository could not be resolved safely.")
 	}
 	configured, exit := r.loadConfig(*configPath, output, "list")
 	if exit != ExitOK {
@@ -121,6 +127,43 @@ func (r Runner) runList(ctx context.Context, args []string, output io.Writer) in
 	if status == contract.StatusUnsupported && len(sources) == 0 {
 		return r.writeUnsupportedResult(output, "list", omissions)
 	}
+	selected := make([]contract.Source, 0, len(sources))
+	unknownReasons := map[string]int{}
+	incompleteMatches := map[string]int{}
+	for i := range sources {
+		membership := resolver.Observe(&sources[i])
+		if *repositoryPath == "" || membership == "match" {
+			selected = append(selected, sources[i])
+		}
+		if *repositoryPath != "" {
+			reason := repository.Uncertainty(sources[i])
+			if membership == "unknown" {
+				unknownReasons[reason]++
+			} else if membership == "match" && reason != "" {
+				incompleteMatches[reason]++
+			}
+		}
+	}
+	sources = selected
+	for _, entry := range []struct {
+		code    string
+		counts  map[string]int
+		message string
+	}{
+		{"repository_membership_unknown", unknownReasons, "Candidate sources have unresolved repository membership; no match does not establish absence."},
+		{"repository_evidence_incomplete", incompleteMatches, "Matched sources contain additional unresolved working-directory evidence."},
+	} {
+		reasons := make([]string, 0, len(entry.counts))
+		for reason := range entry.counts {
+			reasons = append(reasons, reason)
+		}
+		sort.Strings(reasons)
+		for _, reason := range reasons {
+			status = contract.StatusPartial
+			omissions = append(omissions, contract.Omission{Code: entry.code, Scope: "repository", Count: entry.counts[reason], Reason: reason, Message: entry.message})
+		}
+	}
+
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Identity.SourceRef < sources[j].Identity.SourceRef })
 	page, next, pageOmission, err := paginateSources(sources, offset, *limit)
 	if err != nil {
@@ -132,6 +175,9 @@ func (r Runner) runList(ctx context.Context, args []string, output io.Writer) in
 	}
 	envelope := contract.NewEnvelope("list", r.Version, status)
 	envelope.Data = &contract.Data{Sources: &page}
+	if *repositoryPath != "" {
+		envelope.Data.Repository = &contract.RepositoryTarget{CommonDir: resolver.CommonDir()}
+	}
 	envelope.Page = next
 	envelope.Omissions = omissions
 	return r.write(output, envelope, exitForStatus(status))
@@ -162,6 +208,8 @@ func (r Runner) runShow(ctx context.Context, args []string, output io.Writer) in
 	if err := validateSources(result.Sources, parsed.Provider, parsed.SourceInstance); err != nil || result.Sources[0].Identity.ProviderSourceFingerprint != parsed.Fingerprint {
 		return r.writeError(output, "show", ExitFailure, "invalid_provider_result", "provider", "The provider returned an invalid source result.")
 	}
+	resolver, _ := repository.New(ctx, "")
+	resolver.Observe(&result.Sources[0])
 	envelope := contract.NewEnvelope("show", r.Version, result.Status)
 	envelope.Data = &contract.Data{Source: &result.Sources[0]}
 	envelope.Omissions = append([]contract.Omission{}, result.Omissions...)
@@ -530,6 +578,9 @@ func validateProviderResultStatus(status contract.Status, omissions []contract.O
 func validateSources(sources []contract.Source, providerName, instance string) error {
 	seen := map[string]struct{}{}
 	for _, source := range sources {
+		if err := contract.ValidateWorkingDirectories(source.WorkingDirectories); err != nil {
+			return err
+		}
 		identity := source.Identity
 		if identity.Provider != providerName || identity.SourceInstance != instance {
 			return errors.New("source identity does not match its instance")

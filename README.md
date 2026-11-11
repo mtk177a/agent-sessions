@@ -112,6 +112,20 @@ The configuration reference uses these terms:
 
 See [named source instances and configuration](docs/cli-json-contract.md#configuration) for nonstandard locations or multiple stores.
 
+### Find sessions by repository
+
+Select a local Git repository, including its linked worktrees:
+
+```sh
+agent-sessions list --repository /fictional/project
+```
+
+This searches recorded working directories, including supported changes during a conversation.\
+`--repository` selects the work target; `--root` still selects the provider's records.\
+Independent clones and nested repositories remain separate.\
+Read `status` and `omissions`: zero matches with unresolved candidates do not establish that no matching conversation exists.\
+See [repository search and its limits](docs/cli-json-contract.md#find-sessions-for-a-local-git-repository).
+
 ### Choose a command
 
 Choose the command for the information that you need:

@@ -82,6 +82,43 @@ func TestWorkingDirectoriesFollowInheritedPrefixOnly(t *testing.T) {
 	}
 }
 
+func TestCommandDirectoryPathAcceptsLocalPaths(t *testing.T) {
+	posixURI := "file:///fictional/space%20%23%25"
+	windowsURI := "file:///C:/fictional/space%20%23%25"
+	localURI, foreignURI := posixURI, windowsURI
+	path := "/fictional/space #%"
+	if filepath.Separator == '\\' {
+		localURI, foreignURI = windowsURI, posixURI
+		path = filepath.FromSlash("C:" + path)
+	}
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"absolute_path", path, path},
+		{"local_uri", localURI, path},
+		{"localhost_uri", strings.Replace(localURI, "file://", "file://localhost", 1), path},
+		{"foreign_path_convention", foreignURI, ""},
+		{"remote_authority", "file://example.invalid/fictional", ""},
+		{"empty_fragment", localURI + "#", ""},
+		{"encoded_separator", localURI + "%2fchild", ""},
+		{"invalid_escape", localURI + "%zz", ""},
+		{"opaque_uri", "file:fictional", ""},
+		{"opaque_fallback", "file:///%00/bad/path/fictional", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := contract.NewWorkingDirectories()
+			w.Add(contract.WorkingDirectory{Path: commandDirectoryPath(tc.input), Evidence: "tool"})
+			if tc.want == "" {
+				if len(w.Locations) != 0 || w.State != "partial" {
+					t.Fatalf("expected unavailable location: %+v", w)
+				}
+			} else if len(w.Locations) != 1 || w.Locations[0].Path != tc.want || w.State != "complete" {
+				t.Fatalf("expected %q: %+v", tc.want, w)
+			}
+		})
+	}
+}
+
 // Synthetic provider paths must be absolute on the host that runs the test.
 // Keep this conversion before history byte boundaries are calculated.
 func nativeDirectoryFixture(value string) string {

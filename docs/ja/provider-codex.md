@@ -315,6 +315,10 @@ Canonicalized legacy paginated ロールアウトでは、観測済みのメッ�
 作業場所の取得には、構造を条件とする将来版への対応を含め、既存のやり取り時刻の版・プロファイル・行構造の境界を使う。\
 `events` と `verify` の対応は広げない。
 
+`CommandExecution.cwd` は `PathUri` 形式で記録される。\
+アダプターはローカルの `file:` URI を実行環境のパス形式に従う絶対パスへ変換し、絶対パスで記録された値も受け付ける。\
+リモートホストを指す URI、通常のパスに変換できない代替 URI、別のプラットフォームのパスがある場合は、作業場所の取得範囲を partial とする。
+
 選択したヘッダーと有効な論理履歴の行から場所を取得する。\
 子セッションの境界より前の親のコピーと、継承対象から外れた後続部分は含めない。\
 場所の欠落・不正、未知の行、解決できない履歴、リソース上限がある場合は、作業場所の取得範囲を partial とする。\
@@ -324,6 +328,7 @@ Codex の Git URL、ブランチ、コミットではローカル clone を識�
 
 公式の [永続化プロトコルの構造](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/protocol.rs) が、セッションとターンの `cwd` および Git 情報を定義する。\
 公式の [item の構造](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) が、コマンドの作業場所を定義する。\
+公式の [`PathUri` の実装](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/utils/path-uri/src/lib.rs) が、作業場所の URI への変換方法を定義する。\
 これらのアダプター入力は安定した公開フィールドではない。
 
 ### イベントの生成

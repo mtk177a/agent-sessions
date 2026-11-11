@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,6 +135,50 @@ func TestRepositoryUnknownDoesNotMeanNoMatches(t *testing.T) {
 	}
 }
 
+func TestRepositorySearchUsesCodexCommandDirectoryURI(t *testing.T) {
+	base := t.TempDir()
+	target := repo(t, filepath.Join(base, "target space #%"))
+	other := repo(t, filepath.Join(base, "other"))
+	home := filepath.Join(base, "records")
+	id := "11111111-2222-4333-8444-000000000001"
+	uriPath := filepath.ToSlash(target)
+	if filepath.VolumeName(target) != "" {
+		uriPath = "/" + uriPath
+	}
+	cwd := (&url.URL{Scheme: "file", Path: uriPath}).String()
+	write(t, filepath.Join(home, "sessions", "rollout-2026-09-03T10-00-00-"+id+".jsonl"),
+		map[string]any{"ordinal": 0, "timestamp": "2026-09-03T10:00:00Z", "type": "session_meta",
+			"payload": map[string]any{
+				"id": id, "session_id": id, "cli_version": "0.155.0-alpha.9.2", "history_mode": "paginated",
+				"timestamp": "2026-09-03T10:00:00Z", "cwd": other, "originator": "codex_cli_rs", "source": "cli",
+			}},
+		map[string]any{"ordinal": 1, "timestamp": "2026-09-03T10:00:01Z", "type": "event_msg",
+			"payload": map[string]any{"type": "item_completed", "item": map[string]any{
+				"type": "UserMessage", "id": "fictional-message", "content": []any{},
+			}}},
+		map[string]any{"ordinal": 2, "timestamp": "2026-09-03T10:00:02Z", "type": "event_msg",
+			"payload": map[string]any{"type": "item_completed", "item": map[string]any{
+				"type": "CommandExecution", "id": "fictional-command", "cwd": cwd,
+				"command": []string{"git", "status"}, "parsed_cmd": []any{}, "source": "agent", "status": "completed", "exit_code": 0,
+			}}},
+	)
+
+	e := run(t, "list", "--provider", "codex", "--root", home, "--repository", target)
+	sources := *e.Data.Sources
+	ref := contract.NewSourceRef("codex", "codex-default", id)
+	if e.Status != contract.StatusComplete || len(sources) != 1 || sources[0].Identity.SourceRef != ref {
+		t.Fatalf("expected a match from the command directory, got %d sources and omissions %v", len(sources), e.Omissions)
+	}
+	for _, location := range sources[0].WorkingDirectories.Locations {
+		if location.Evidence == "tool" && location.Path == target &&
+			location.Repository != nil && location.Repository.Basis == "current_git" &&
+			location.Repository.CommonDir == e.Data.Repository.CommonDir {
+			return
+		}
+	}
+	t.Fatal("missing resolved command directory")
+}
+
 func claudeSession(t *testing.T, home string, n int, paths []string, states ...any) string {
 	t.Helper()
 	id := fmt.Sprintf("aaaaaaaa-bbbb-4ccc-8ddd-%012d", n)
@@ -149,6 +194,67 @@ func claudeSession(t *testing.T, home string, n int, paths []string, states ...a
 	}
 	write(t, filepath.Join(home, "projects", "synthetic", id+".jsonl"), rows...)
 	return contract.NewSourceRef("claude", "claude-default", id)
+}
+
+func TestRepositoryClaudeMappingWithMissingPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name, original, previous, basis, reason string
+		removeWorktree, pruneRegistration       bool
+	}{
+		{name: "live_missing_origin", basis: "current_git"},
+		{name: "registered_missing_origin", removeWorktree: true, basis: "git_registration"},
+		{name: "live_missing_previous", original: "target", basis: "current_git"},
+		{name: "registered_missing_previous", original: "target", removeWorktree: true, basis: "git_registration"},
+		{name: "no_independent_evidence", removeWorktree: true, pruneRegistration: true, reason: "mapping_unavailable"},
+		{name: "conflicting_origin", original: "other", reason: "conflicting_evidence"},
+		{name: "conflicting_previous", previous: "other", reason: "conflicting_evidence"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			target := repo(t, filepath.Join(base, "target"))
+			other := repo(t, filepath.Join(base, "other"))
+			origin := filepath.Join(base, "original worktree")
+			work := filepath.Join(base, "working worktree")
+			git(t, target, "worktree", "add", "-q", "--detach", origin)
+			git(t, target, "worktree", "add", "-q", "--detach", work)
+			git(t, target, "worktree", "remove", origin)
+			if tc.removeWorktree {
+				if err := os.RemoveAll(work); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.pruneRegistration {
+				git(t, target, "worktree", "prune")
+			}
+			paths := map[string]string{"": origin, "target": target, "other": other}
+			home := filepath.Join(base, "records")
+			ref := claudeSession(t, home, 1, []string{other}, map[string]any{
+				"originalCwd": paths[tc.original], "preEnterOriginalCwd": paths[tc.previous], "worktreePath": work,
+			})
+
+			e := run(t, "list", "--provider", "claude", "--root", home, "--repository", target)
+			sources := *e.Data.Sources
+			if tc.basis != "" {
+				if e.Status != contract.StatusComplete || len(sources) != 1 || sources[0].Identity.SourceRef != ref {
+					t.Fatalf("expected a match from %s, got %d sources and omissions %v", tc.basis, len(sources), e.Omissions)
+				}
+				membership := sources[0].WorkingDirectories.Locations[1].Repository
+				if membership == nil || membership.State != "resolved" || membership.Basis != tc.basis {
+					t.Fatalf("unexpected membership: %+v", membership)
+				}
+				return
+			}
+			if len(sources) != 0 || e.Status != contract.StatusPartial {
+				t.Fatalf("expected unresolved membership, got %d sources and status %s", len(sources), e.Status)
+			}
+			for _, o := range e.Omissions {
+				if o.Code == "repository_membership_unknown" && o.Count == 1 && o.Reason == tc.reason {
+					return
+				}
+			}
+			t.Fatalf("missing omission for %s: %v", tc.reason, e.Omissions)
+		})
+	}
 }
 func TestRepositoryDeletedWorktreesAndReusedPaths(t *testing.T) {
 	for _, mode := range []string{"registered", "pruned", "reused_clone", "reused_directory"} {

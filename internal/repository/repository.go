@@ -119,28 +119,34 @@ func (r *Resolver) resolve(location contract.WorkingDirectory) contract.Reposito
 	if mapping == nil || mapping.Kind != "git_created" {
 		return m
 	}
-	original := r.current(mapping.OriginalPath)
-	if original.State != "resolved" {
-		return unknown("mapping_unavailable")
-	}
-	if mapping.PreviousPath != "" {
-		previous := r.current(mapping.PreviousPath)
-		if previous.State != "resolved" || previous.CommonDir != original.CommonDir {
+	commonDir := m.CommonDir
+	mappingAvailable := true
+	for _, path := range []string{mapping.OriginalPath, mapping.PreviousPath} {
+		if path == "" {
+			continue
+		}
+		recorded := r.current(path)
+		if recorded.State != "resolved" {
+			mappingAvailable = false
+			continue
+		}
+		if commonDir != "" && commonDir != recorded.CommonDir {
 			return unknown("conflicting_evidence")
 		}
+		commonDir = recorded.CommonDir
 	}
 	if m.State == "resolved" {
-		if m.CommonDir != original.CommonDir {
-			return unknown("conflicting_evidence")
-		}
 		return m
+	}
+	if !mappingAvailable {
+		return unknown("mapping_unavailable")
 	}
 	// A provider mapping can recover an absent worktree, never an existing path
 	// that no longer has the recorded Git relationship.
 	if _, err := os.Lstat(location.Path); !os.IsNotExist(err) {
 		return unknown("conflicting_evidence")
 	}
-	return contract.RepositoryMembership{State: "resolved", CommonDir: original.CommonDir, Basis: "provider_mapping"}
+	return contract.RepositoryMembership{State: "resolved", CommonDir: commonDir, Basis: "provider_mapping"}
 }
 
 // Observe enriches one source and returns match, non_match, or unknown.

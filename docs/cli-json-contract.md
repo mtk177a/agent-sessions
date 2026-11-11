@@ -331,7 +331,7 @@ Each location has these fields:
 
 | Field | Meaning |
 | --- | --- |
-| `path` | The recorded absolute directory, without truncation or inference from text. |
+| `path` | The recorded absolute directory after provider-specific path decoding, without truncation or inference from text. |
 | `evidence` | `session`, `turn`, `tool`, `interaction`, or `worktree`: the normalized kind of recorded evidence. |
 | `mapping` (optional) | Recorded worktree relationship: required `original_path` and `kind`, and optional `previous_path`. The kind is `git_created`, `existing`, `hook`, or `unknown`. |
 | `repository` (optional) | Local resolution: required `state`, either `resolved` or `unknown`. |
@@ -351,6 +351,7 @@ For an absent worktree root, a remaining registration in the query repository ca
 This fallback requires the exact root path; an absent descendant could have contained a separate nested repository.\
 `show` has no query repository and therefore does not search its registrations.\
 A verified provider mapping for normal Git creation can resolve an absent root from its original directory, provided that any recorded previous directory also resolves to the same repository.\
+If the original or previous directory cannot be resolved, membership established by current Git evidence or a remaining registration still applies.\
 Existing-worktree entry and Hook creation never establish that relationship by themselves.\
 An existing path with conflicting or unusable administration is not recovered as a deleted worktree.\
 Unrecoverable locations stay unknown.

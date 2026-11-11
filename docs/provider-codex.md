@@ -307,6 +307,10 @@ Missing or invalid timestamps, uncertain rows, unresolved history, and input lim
 These become common `session`, `turn`, and `tool` evidence, without parsing command strings.\
 Directory extraction uses the existing interaction-time version/profile and row-structure boundary, including its structural forward compatibility; it does not expand `events` or `verify` support.
 
+`CommandExecution.cwd` uses the `PathUri` format.\
+The adapter decodes local `file:` URIs to absolute paths in the host's path syntax and also accepts recorded absolute paths.\
+Remote authorities, opaque fallback URIs, and paths for another platform leave directory coverage partial.
+
 The selected header and effective logical rows contribute locations.\
 Copied parent context before a child boundary and excluded inherited suffixes do not contribute.\
 Missing or invalid directories, unknown rows, unresolved history, and resource limits leave directory coverage partial.\
@@ -316,6 +320,7 @@ For deleted worktrees without a usable saved mapping, repository search can use 
 
 The official [persisted protocol structures](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/protocol.rs) define session and turn `cwd` and Git information.\
 The official [item structures](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) define recorded command directories.\
+The official [`PathUri` implementation](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/utils/path-uri/src/lib.rs) defines their URI encoding.\
 These adapter inputs are not stable public fields.
 
 ### Event generation

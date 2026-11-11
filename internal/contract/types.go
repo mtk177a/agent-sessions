@@ -31,6 +31,7 @@ type Envelope struct {
 }
 
 type Data struct {
+	Repository      *RepositoryTarget  `json:"repository,omitempty"`
 	Sources         *[]Source          `json:"sources,omitempty"`
 	Source          *Source            `json:"source,omitempty"`
 	SourceRef       string             `json:"source_ref,omitempty"`
@@ -38,13 +39,46 @@ type Data struct {
 	VerifiedVersion *VerifiedVersionID `json:"verified_version,omitempty"`
 }
 
+type RepositoryTarget struct {
+	CommonDir string `json:"common_dir"`
+}
+
 type Source struct {
-	Identity          SourceIdentity `json:"identity"`
-	Kind              string         `json:"kind"`
-	LastInteractionAt *string        `json:"last_interaction_at,omitempty"`
-	VersionHint       *VersionHint   `json:"version_hint,omitempty"`
-	Relationships     []Relationship `json:"relationships"`
-	Metadata          []Metadata     `json:"metadata"`
+	WorkingDirectories *WorkingDirectories `json:"working_directories,omitempty"`
+	Identity           SourceIdentity      `json:"identity"`
+	Kind               string              `json:"kind"`
+	LastInteractionAt  *string             `json:"last_interaction_at,omitempty"`
+	VersionHint        *VersionHint        `json:"version_hint,omitempty"`
+	Relationships      []Relationship      `json:"relationships"`
+	Metadata           []Metadata          `json:"metadata"`
+}
+
+// WorkingDirectories describes recorded locations, not inferred command effects.
+// Its coverage is independent of event decoding and source interaction time.
+type WorkingDirectories struct {
+	State     string             `json:"state"`
+	Locations []WorkingDirectory `json:"locations"`
+	Reasons   []string           `json:"reasons"`
+}
+
+type WorkingDirectory struct {
+	Path       string                `json:"path"`
+	Evidence   string                `json:"evidence"`
+	Mapping    *WorktreeMapping      `json:"mapping,omitempty"`
+	Repository *RepositoryMembership `json:"repository,omitempty"`
+}
+
+type WorktreeMapping struct {
+	OriginalPath string `json:"original_path"`
+	PreviousPath string `json:"previous_path,omitempty"`
+	Kind         string `json:"kind"`
+}
+
+type RepositoryMembership struct {
+	State     string `json:"state"`
+	CommonDir string `json:"common_dir,omitempty"`
+	Basis     string `json:"basis,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 type SourceIdentity struct {
@@ -168,6 +202,7 @@ type Page struct {
 }
 
 type Omission struct {
+	Reason  string `json:"reason,omitempty"`
 	Code    string `json:"code"`
 	Scope   string `json:"scope"`
 	Count   int    `json:"count,omitempty"`
@@ -202,7 +237,13 @@ func (e Envelope) Validate() error {
 		return errors.New("invalid contract version")
 	}
 	if e.Data != nil {
+		if e.Data.Repository != nil && !ValidDirectoryPath(e.Data.Repository.CommonDir) {
+			return errors.New("invalid repository target")
+		}
 		checkSource := func(source Source) error {
+			if err := ValidateWorkingDirectories(source.WorkingDirectories); err != nil {
+				return err
+			}
 			if source.LastInteractionAt != nil {
 				return ValidateInteractionTime(*source.LastInteractionAt)
 			}
@@ -234,7 +275,7 @@ func (e Envelope) Validate() error {
 		}
 	}
 	for _, omission := range e.Omissions {
-		if !ValidToken(omission.Code) || !ValidToken(omission.Scope) {
+		if !ValidToken(omission.Code) || !ValidToken(omission.Scope) || omission.Reason != "" && !ValidToken(omission.Reason) {
 			return errors.New("invalid omission identifier")
 		}
 	}

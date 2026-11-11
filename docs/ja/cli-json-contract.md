@@ -15,7 +15,7 @@
 コマンドの構文は次のとおりである。
 
 ```text
-agent-sessions list [--config PATH] [--provider ID [--source-instance ID] [--root PATH]] [--limit N] [--cursor TOKEN]
+agent-sessions list [--config PATH] [--provider ID [--source-instance ID] [--root PATH]] [--repository PATH] [--limit N] [--cursor TOKEN]
 agent-sessions show [--config PATH] [--root PATH] <source-ref>
 agent-sessions events [--config PATH] [--root PATH] [--limit N] [--cursor TOKEN] <source-ref>
 agent-sessions verify [--config PATH] [--root PATH] <source-ref>
@@ -31,6 +31,7 @@ agent-sessions verify [--config PATH] [--root PATH] <source-ref>
 | `--provider ID` | `list` | 一つのプロバイダーを選ぶ。省略時は利用可能なプロバイダーをまとめる。 |
 | `--source-instance ID` | `--provider` を指定した `list` | 名前付きの保存場所やエクスポートを一つ選ぶ。 |
 | `--root PATH` | 全操作。`list` では `--provider` が必要 | 今回の呼び出しでプロバイダー単位のルートを上書きする。 |
+| `--repository PATH` | `list` | ローカル Git リポジトリと、その linked worktree を選ぶ。提供元の記録ルートとは独立した指定である。 |
 | `--limit N` | `list`、`events` | ページサイズを指定する。既定 50、最大 100。 |
 | `--cursor TOKEN` | `list`、`events` | 前のページが返した不透明なカーソルで続きを取得する。 |
 
@@ -44,6 +45,37 @@ agent-sessions verify [--config PATH] [--root PATH] <source-ref>
 明示したルートから一覧にしたソースを読む場合は、後続の操作にもそのルートを渡すか、インスタンスを設定する。\
 ソース参照はルートのパスを含まない。\
 ルートの選択は [読み取り対象の設定](#読み取り対象の設定)、ページ分割は [全ページを取得する](#全ページを取得する) を参照する。
+
+### ローカル Git リポジトリのセッションを探す
+
+```sh
+agent-sessions list --repository /fictional/project
+```
+
+`PATH` には、存在するリポジトリのルート、worktree、またはサブディレクトリを指定する。\
+コマンドで指定した相対パスは、呼び出し時のディレクトリから解決する。\
+`PATH` 上に Git があり、`rev-parse --path-format=absolute` と `worktree list --porcelain -z` に対応している必要がある。\
+対象、Git 実行ファイル、または対象の登録一覧を利用できない場合は、`invalid_repository` と終了コード `2` を返す。
+
+正規化した Git 共通管理ディレクトリを比較する。\
+リモート URL、ブランチ、コミットによって独立した clone を統合せず、入れ子のリポジトリも個別に解決する。\
+記録された作業場所が一つでも指定リポジトリに所属すれば、そのソースは一致する。\
+複数の観測が一致してもソースは 1 件とし、イベントには対応する会話全体を引き続き含める。
+
+絞り込みは、ソース参照による並べ替えとページ分割の前に行う。\
+ページ間では、リポジトリ、記録ルート、設定、ソースのスナップショットを変えない。\
+`data.repository.common_dir` は検索対象の解決結果であり、安定したソース識別子ではなく、ローカルの場所を示す。
+
+所属不明の候補は `data.sources` から除外し、scope が `repository` の `repository_membership_unknown` に件数を示す。\
+任意のトークン `reason` が各グループの理由を示し、`count` はパス数ではなく候補数を数える。\
+複数の不足がある候補も一度だけ数え、その理由の一つを示す。\
+件数は各ページで候補全体を対象とし、ページ分割の省略とは区別する。\
+一致したソースに別の不足が残る場合は、そのソースを含めたうえで、同じく理由ごとに `repository_evidence_incomplete` を返す。\
+いずれの省略も、最後のページを含めて検索結果を `partial` にする。\
+空の partial 結果から、該当する会話が存在しないとは判断できない。
+
+理由には `directory_unavailable`、`invalid_directory`、`git_unavailable`、`mapping_unavailable`、`conflicting_evidence`、`history_unavailable`、`ambiguous_artifact`、`unsupported_directory_record`、`invalid_directory_record`、`unsupported_provider`、`directory_limit`、`git_lookup_limit` がある。\
+検出、ソース時刻、その他の既存の省略は、ソースが絞り込みで除外されても応答に残る。
 
 ## 読み取り対象の設定
 
@@ -223,7 +255,7 @@ agent-sessions list --provider codex --source-instance codex-one
 #### 共通フィールド
 
 各ソースには `identity`、`kind`、`relationships`、`metadata` が必要である。\
-`version_hint`、`last_interaction_at`、`identity.provider_native_source_id` は任意であり、その他の識別フィールドはすべて必須である。
+`working_directories`、`version_hint`、`last_interaction_at`、`identity.provider_native_source_id` は任意であり、その他の識別フィールドはすべて必須である。
 
 #### 論理識別子
 
@@ -295,6 +327,56 @@ ChatGPT Data Export はエクスポート ZIP 全体の SHA-256 識別子とし�
 **ChatGPT のアクティブな分岐**
 
 ChatGPT Data Export では選択中の会話経路にあるやり取りを対象とし、別の分岐によってこのフィールドは進まない。
+
+#### 記録された作業場所
+
+`list` と `show` は、任意の `working_directories` を返すことがある。\
+フィールドがない場合は、この観測が未対応であり、どのリポジトリでも作業しなかったことを意味しない。\
+このオブジェクトには `state`、`locations`、`reasons` が必要で、両配列は空でもよい。\
+`state` は `complete`、`partial`、`unsupported` のいずれかで、記録された作業場所の根拠を取得できた範囲を示す。\
+`partial` と `unsupported` にはトークンの理由が必要で、`complete` では理由を持たない。\
+取得が complete でも、実際のすべての移動が記録されたとは証明できない。
+
+各作業場所のフィールドは次のとおりである。
+
+| フィールド | 意味 |
+| --- | --- |
+| `path` | 記録された絶対ディレクトリ。短縮せず、文章から推測しない。 |
+| `evidence` | `session`、`turn`、`tool`、`interaction`、`worktree`。記録された根拠の共通分類。 |
+| `mapping`（任意） | 記録された worktree の対応。`original_path` と `kind` が必須で、`previous_path` は任意。種類は `git_created`、`existing`、`hook`、`unknown`。 |
+| `repository`（任意） | ローカルでの解決結果。必須の `state` は `resolved` または `unknown`。 |
+
+resolved の所属には `common_dir` と `basis` が必要で、`reason` を持たない。\
+根拠は `current_git`、`git_registration`、`provider_mapping` のいずれかである。\
+unknown の所属にはトークン `reason` が必要で、`common_dir` と `basis` を持たない。\
+プロバイダーの結果は所属の解決を省略でき、CLI の `list` と `show` が返す作業場所を解決する。
+
+現在の Git による解決では、最も近いリポジトリを使い、管理パスのシンボリックリンクを解決する。\
+これは現在のファイルシステムの根拠であり、過去の所属の証明ではない。\
+移動、検出できないパスの再利用、別環境からコピーした記録は、パスだけでは復元できない。\
+利用できる根拠が矛盾する場合は、どちらかの所属を選ばず、不明とする。\
+あるパスの矛盾は、同一ソース内のそのパスの別の所属判定も無効にするが、独立した場所での一致は捨てない。
+
+worktree のルートが存在しない場合は、検索対象リポジトリに残る登録から所属を確認できる。\
+この補完はルートの完全一致に限り、存在しない子ディレクトリには別の入れ子リポジトリがあった可能性が残る。\
+`show` には検索対象リポジトリがないため、その登録は調べない。\
+通常の Git 作成として確認したプロバイダーの対応情報は、元の場所から、存在しないルートを解決できる。\
+以前の場所が記録されている場合は、それも同じリポジトリに解決できる必要がある。\
+既存 worktree への移動と Hook 作成は、それだけでこの関係を確定しない。\
+存在するパスの管理情報が矛盾するか利用できない場合は、削除済み worktree として補完しない。\
+復元できない場所は不明のままとする。
+
+ソースごとの異なる作業場所の観測は最大 256 件で、呼び出しごとの未照会の Git ディレクトリの確認は最大 4,096 件である。\
+これを超える観測や確認は不完全として残る。\
+各 Git 読み取りには 5 秒のタイムアウトと 1 MiB の標準出力上限がある。\
+パスや構造上のフィールドを別の識別子へ短縮しない。
+
+`--repository` がない場合、外側の status は従来のソースメタデータについての意味を保つ。\
+この任意の観測には、`working_directories.state`、`reasons`、各 `repository.state` を確認する。\
+絞り込みがある場合は、[リポジトリ検索](#ローカル-git-リポジトリのセッションを探す) の規定に従い、不確実性を外側にも反映する。\
+作業場所の根拠は、ソース参照、ヒント、イベント番号、提供元内容の検証済みバージョンを変えない。\
+所属解決に使う Git 管理情報は、`verify` の根拠には含まれない。\
+作業場所や Git 管理パスには私的な情報が含まれ得るが、自動では秘匿化しない。
 
 ### イベント
 
@@ -474,6 +556,7 @@ JSON として記録された入力や結果の項目名はプロバイダー固
 
 #### omissions
 
+各省略は任意のトークン `reason` を含めることができる。\
 各省略には、トークン値の `code` と `scope`、安全な人間向けの `message` が必要である。\
 任意の正の整数 `count` は、その省略が表す既知の項目数を示す。\
 これがないことは、影響を受けるプロバイダー値が 0 件であることを意味しない。
@@ -505,6 +588,7 @@ JSON として記録された入力や結果の項目名はプロバイダー固
 - `invalid_pagination`。
 - `invalid_cursor`。
 - `invalid_source_ref`。
+- `invalid_repository`。
 - `source_resolution_failed`。
 - `config_path_unavailable`。
 - `invalid_configuration`。

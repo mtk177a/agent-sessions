@@ -84,6 +84,7 @@ Support for interaction time differs from support for event decoding and format 
 | Operations | Supported versions and conditions |
 | --- | --- |
 | `list`, `show`: interaction time | Verified versions `2.1.177`, `2.1.228`, and `2.1.260`. Also syntactically valid versions at or after `2.1.260` when every row retains a known structure, with no version ceiling. |
+| `list`, `show`: working directories | Observation-row `cwd` uses the interaction-time version and structural boundary above. Worktree-state mappings accept the inspected `2.1.228`, `2.1.260`, and `2.1.322` structures; other state versions remain incomplete. |
 | `events`, `verify`: event decoding and format verification | Verified internal transcript JSONL structures for `2.1.177`, `2.1.228`, and `2.1.260`. Other versions remain incomplete. |
 
 Claude Code documents the transcript location, but each line's internal structure can change between releases.\
@@ -262,6 +263,31 @@ The adapter does not return a source time in these cases:
 - A potentially interactive row or block is unknown.
 - A version is malformed, or is older than `2.1.260` and unverified.
 - More than one transcript has the same session identity.
+
+#### Recorded working directories and worktree state
+
+Directory evidence is extracted independently of event decoding and interaction time.\
+Observation-row `cwd` becomes common `interaction` evidence, including later rows after a resume or directory change.\
+The adapter does not decode the project directory name or parse commands and messages to infer locations.
+
+For `2.1.228`, `2.1.260`, and `2.1.322`, `worktree-state.worktreeSession` is an object or `null`.\
+An object supplies `worktreePath`, `originalCwd`, optional `preEnterOriginalCwd`, and the session ID.\
+`hookBased` and `enteredExisting` distinguish Hook creation and entry into an existing worktree.\
+The adapter checks row and mapping session IDs, path types, and creation flags before returning common `worktree` evidence and a normalized mapping.\
+A normal Git-created mapping can associate an absent worktree root with the original directory only when recorded previous-directory evidence also agrees.\
+Hook and existing-entry states do not establish that association.\
+An unrecognized creation mode remains incomplete.
+
+Every state row is considered in order.\
+A `null` state clears active provider state but does not erase earlier evidence that the session worked in a directory.\
+The most recent explicit row version governs following versionless state rows; an unknown resumed version does not inherit older mapping support.\
+Missing, malformed, mismatched, ambiguous, or unsupported records leave coverage partial; confirmed independent locations remain usable.
+
+The object-copy writer, transcript append, normal creation, existing-entry, Hook, and clear paths were statically checked in signature-verified official `2.1.228` and `2.1.260` distributions.\
+The same checks include the signed `2.1.322` distribution and its `madeElsewhere` field.\
+This directory-specific compatibility does not extend `events` or `verify` support.\
+No real transcripts were used for this change.\
+These checks establish the supported structures, not that every session retains a state record or every past path still has its original membership.
 
 ### Event generation
 

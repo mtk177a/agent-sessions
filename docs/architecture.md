@@ -58,6 +58,7 @@ The following packages implement these responsibilities:
 | [`cmd/agent-sessions`](../cmd/agent-sessions) | Register the production adapters and start the CLI. |
 | [`internal/config`](../internal/config) | Read machine-local configuration and select provider-level roots. |
 | [`internal/provider`](../internal/provider) and its adapters | Find and read records, normalize provider data, and collect verification evidence. |
+| [`internal/repository`](../internal/repository) | Resolve normalized working-directory evidence against local Git administration without writes. |
 | [`internal/cli`](../internal/cli) | Dispatch commands, validate results, enforce output limits, paginate results, and write JSON. |
 | [`internal/contract`](../internal/contract) | Define common response types, source references, content bounds, and version hashing. |
 | [`internal/safeio`](../internal/safeio) | Read files within size limits. Verify that they stay inside the selected root and have not been replaced. |
@@ -159,6 +160,20 @@ Sources can include relationships stated in the provider's records.
 `last_interaction_at` is the latest message or tool interaction time that the records establish for the logical source.\
 It is distinct from a file's modification time or provider management activity.\
 The [source-time specification](cli-json-contract.md#source-interaction-time) and provider documents define accepted observations and missing-time behavior.
+
+**Working directories and repository search**
+
+Adapters extract recorded working directories and explicit worktree relationships from the selected logical history.\
+They own provider field and version checks; they do not infer directory changes from conversation text or commands.\
+The repository resolver reads Git common administration directories and registrations.\
+It distinguishes current filesystem evidence, remaining registrations, and verified provider mappings, and preserves uncertainty or conflicts.\
+The CLI filters sources before pagination; consumer analysis remains outside this layer.\
+See the [public search contract](cli-json-contract.md#find-sessions-for-a-local-git-repository) for completeness and historical limits.
+
+Git reads use bounded subprocess output, timeouts, no optional locks, and no filesystem monitor.\
+Inherited Git repository and configuration overrides are removed; system and global Git configuration are disabled for these reads.\
+Only `rev-parse` and `worktree list` are used; no repair, pruning, refresh, Hook, persistent mapping, or index is added.\
+Git metadata is not provider-content verification evidence.
 
 #### Events
 

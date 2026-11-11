@@ -114,6 +114,21 @@ agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /
 
 標準以外の場所や複数の保存場所の設定方法は、[名前付きソースインスタンスと設定](docs/ja/cli-json-contract.md#読み取り対象の設定) を参照する。
 
+### リポジトリでセッションを探す
+
+linked worktree を含めて、ローカル Git リポジトリを選ぶ。
+
+```sh
+agent-sessions list --repository /fictional/project
+```
+
+記録された作業場所を検索し、対応形式で記録された会話途中の変更も対象にする。\
+`--repository` は作業対象を選び、`--root` は引き続き提供元の記録を選ぶ。\
+独立した clone と入れ子のリポジトリは区別する。\
+`status` と `omissions` を確認する。\
+所属不明の候補がある場合、一致が 0 件でも該当会話がないとは判断できない。\
+[リポジトリ検索と限界](docs/ja/cli-json-contract.md#ローカル-git-リポジトリのセッションを探す) を参照する。
+
 ### 実行するコマンドを選ぶ
 
 取得したい情報に応じて、コマンドを選ぶ。

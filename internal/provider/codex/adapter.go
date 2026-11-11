@@ -160,6 +160,7 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 
 func observeArtifact(source config.Source, selected artifact, ambiguous bool, byRollout map[string][]artifact) (contract.Source, []contract.Omission) {
 	itemSource, omissions := makeSource(source, selected)
+	itemSource.WorkingDirectories = readWorkingDirectories(source.Root, selected, byRollout, ambiguous)
 	logical := selected.meta.HistoryBase != nil || selected.meta.SubagentHistoryStartOrdinal != nil
 	if logical {
 		itemSource.VersionHint = nil

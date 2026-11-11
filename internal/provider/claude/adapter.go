@@ -133,6 +133,7 @@ func (a *Adapter) List(_ context.Context, source config.Source) provider.SourceR
 			omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version is outside the interaction-time compatibility boundary."))
 		}
 		itemSource := makeSource(source, candidates)
+		itemSource.WorkingDirectories = readWorkingDirectories(source.Root, candidates)
 		if len(candidates) == 1 && supportsInteractionTimeVersion(candidates[0].version) {
 			if value, ok := readLastInteractionAt(source.Root, candidates[0]); ok {
 				itemSource.LastInteractionAt = &value
@@ -171,6 +172,7 @@ func (a *Adapter) Show(_ context.Context, source config.Source, fingerprint stri
 		omissions = append(omissions, omission("unsupported_format", "source", "The Claude Code transcript version is outside the interaction-time compatibility boundary."))
 	}
 	itemSource := makeSource(source, candidates)
+	itemSource.WorkingDirectories = readWorkingDirectories(source.Root, candidates)
 	if len(candidates) == 1 && supportsInteractionTimeVersion(candidates[0].version) {
 		if value, ok := readLastInteractionAt(source.Root, candidates[0]); ok {
 			itemSource.LastInteractionAt = &value

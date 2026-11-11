@@ -308,6 +308,24 @@ Canonicalized legacy paginated ロールアウトでは、観測済みのメッ�
 
 時刻の欠落・不正値、不明確な行、履歴を解決できない場合、入力上限を超えた場合は、ファイルの更新時刻で補わず、ソースの時刻を出さない。
 
+#### 記録された作業場所
+
+`list` と `show` は `session_meta.payload.cwd`、`turn_context.payload.cwd`、完了した `CommandExecution.cwd`、記録された従来の `local_shell_call.action.cwd` を読む。\
+コマンド文字列を解析せず、共通の `session`、`turn`、`tool` の根拠にする。\
+作業場所の取得には、構造を条件とする将来版への対応を含め、既存のやり取り時刻の版・プロファイル・行構造の境界を使う。\
+`events` と `verify` の対応は広げない。
+
+選択したヘッダーと有効な論理履歴の行から場所を取得する。\
+子セッションの境界より前の親のコピーと、継承対象から外れた後続部分は含めない。\
+場所の欠落・不正、未知の行、解決できない履歴、リソース上限がある場合は、作業場所の取得範囲を partial とする。\
+履歴境界の検査が失敗した場合は、その走査で得た観測を捨てる。\
+Codex の Git URL、ブランチ、コミットではローカル clone を識別しない。\
+削除済み worktree で使える保存済みの対応がない場合、リポジトリ検索は残存する Git 登録を使うことができ、それもなければ所属は不明のままとする。
+
+公式の [永続化プロトコルの構造](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/protocol.rs) が、セッションとターンの `cwd` および Git 情報を定義する。\
+公式の [item の構造](https://github.com/openai/codex/blob/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) が、コマンドの作業場所を定義する。\
+これらのアダプター入力は安定した公開フィールドではない。
+
 ### イベントの生成
 
 #### 対象行の選択

@@ -11,6 +11,8 @@
 - **プロバイダー対応の変更**: [プロバイダー互換性の保守規則](docs/architecture.md#provider-compatibility-maintenance) と、対象プロバイダーの文書に従う。
 - **実装の検証**: 該当する [開発時の検証](README.md#development-validation) を行う。
 
+Issue、検証、コミット、Pull Request の進め方は、[貢献ガイド](CONTRIBUTING.md) に従う。
+
 ## 設計上の制約
 
 アクセス層では、プロバイダーへのアクセス、正規化、検証、公開仕様を扱う。\

@@ -1,5 +1,5 @@
 <!--
-Write the title and Summary in English.
+Follow the title format in CONTRIBUTING.md and write Summary in English.
 Use Japanese by default for the remaining body and comments.
 English is also welcome.
 External contributors do not have to use Japanese.

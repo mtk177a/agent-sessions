@@ -6,6 +6,8 @@
 - **Provider changes**: Obey the [rules for provider compatibility](docs/architecture.md#provider-compatibility-maintenance) and the document for the related provider.
 - **Implementation validation**: Do the applicable [development checks](README.md#development-validation).
 
+Follow the [Contributing Guide](CONTRIBUTING.md) for Issues, verification, commits, and pull requests.
+
 ## Architecture constraints
 
 Use the access layer for provider access, normalization, verification, and public contracts.\

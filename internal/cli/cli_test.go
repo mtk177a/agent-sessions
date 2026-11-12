@@ -17,6 +17,15 @@ import (
 	"github.com/mtk177a/agent-sessions/internal/provider"
 )
 
+func TestVersionFlag(t *testing.T) {
+	runner := Runner{Version: "v0.1.0"}
+	var output bytes.Buffer
+	exit := runner.Run(context.Background(), []string{"--version"}, &output)
+	if exit != ExitOK || output.String() != "agent-sessions v0.1.0\n" {
+		t.Fatalf("exit = %d, output = %q", exit, output.String())
+	}
+}
+
 func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
@@ -58,7 +67,7 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 			if envelope.Operation != tc.wantOperation || envelope.Status != tc.wantStatus {
 				t.Fatalf("unexpected envelope: %#v", envelope)
 			}
-			if envelope.SchemaVersion != "v2" || envelope.Omissions == nil {
+			if envelope.SchemaVersion != "v2" || envelope.CLIVersion != "test" || envelope.Omissions == nil {
 				t.Fatalf("stable envelope fields are missing: %#v", envelope)
 			}
 			switch tc.name {

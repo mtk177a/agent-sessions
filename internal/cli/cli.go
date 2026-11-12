@@ -38,6 +38,12 @@ func (r Runner) Run(ctx context.Context, args []string, output io.Writer) int {
 	if r.Version == "" {
 		r.Version = "dev"
 	}
+	if len(args) == 1 && args[0] == "--version" {
+		if _, err := fmt.Fprintln(output, "agent-sessions", r.Version); err != nil {
+			return ExitFailure
+		}
+		return ExitOK
+	}
 	if r.Registry == nil {
 		r.Registry = provider.NewRegistry()
 	}

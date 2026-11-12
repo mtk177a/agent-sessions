@@ -12,22 +12,36 @@ Use the following procedure to read a saved Codex session.
 ### Requirements
 
 - Go: 1.26 or later
-- Working directory: a checkout of this repository
 
 ### Procedure
 
 #### 1. Install
 
-Run:
+To install a specific release from source, use its published tag.\
+You can run this command from any directory once the `v0.1.0` tag is available.
+
+```sh
+go install github.com/mtk177a/agent-sessions/cmd/agent-sessions@v0.1.0
+```
+
+To install from a local checkout, run this command from the repository root.
 
 ```sh
 go install ./cmd/agent-sessions
 ```
 
-Add the installation directory to your `PATH`:
+Add the installation directory to your `PATH`.
 
 - If `GOBIN` is set, use that directory.
-- If `GOBIN` is not set, use the default Go binary directory.
+- Otherwise, use the `bin` directory under the first path shown by `go env GOPATH`.
+
+Check the installed executable.
+
+```sh
+agent-sessions --version
+```
+
+For the release in this example, the output is `agent-sessions v0.1.0`.
 
 #### 2. Find sessions
 
@@ -141,7 +155,7 @@ See [command syntax and options](docs/cli-json-contract.md#calling-commands) for
 
 ### Process JSON responses
 
-All commands return one JSON object with the stable `v2` response schema.\
+The session commands return one JSON object with the stable `v2` response schema.\
 Make sure that `schema_version` is `v2` before you interpret other response fields.
 
 Use these fields to identify incomplete results and find the next page:

@@ -59,7 +59,7 @@ func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
 		}
 	case "response_item":
 		if profile != profileNativePaginated || compatibility.forward {
-			n.response(profile, line.Payload)
+			n.response(compatibility, line.Payload)
 		}
 	}
 	for i := before; i < len(n.events); i++ {
@@ -126,7 +126,7 @@ func (n *eventNormalizer) completed(profile storageProfile, item completedItem, 
 	}
 }
 
-func (n *eventNormalizer) response(profile storageProfile, raw json.RawMessage) {
+func (n *eventNormalizer) response(compatibility historyCompatibility, raw json.RawMessage) {
 	var item struct {
 		Type   string `json:"type"`
 		Name   string `json:"name"`
@@ -136,7 +136,14 @@ func (n *eventNormalizer) response(profile storageProfile, raw json.RawMessage) 
 		n.omissions = append(n.omissions, omission("malformed_record", "events", "A Codex response row could not be decoded."))
 		return
 	}
-	if profile == profileNativePaginated {
+	switch item.Type {
+	case "web_search_call", "tool_search_call", "tool_search_output":
+		if compatibility.forward {
+			n.omissions = append(n.omissions, omission("unsupported_event", "events", "A Codex search response row has no representation in the public event model."))
+		}
+		return
+	}
+	if compatibility.profile == profileNativePaginated {
 		// For an unlisted paginated profile, raw tool rows may be the only
 		// record of an execution or may duplicate a completed item.
 		switch item.Type {

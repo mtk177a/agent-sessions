@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/mtk177a/agent-sessions/internal/cli"
@@ -140,6 +141,81 @@ func TestUnlistedLegacyRetainsCompletedFunctionCallOutput(t *testing.T) {
 		output.Outcome != "unknown" || output.CallID != "" || output.CorrelationState != "unmatched" || event.RecordedAt != "2026-09-03T10:00:01Z" ||
 		len(event.Metadata) != 1 || event.Metadata[0].Name != "tool_name" || event.Metadata[0].Value != "fictional-tool" {
 		t.Fatalf("Expected standalone recorded tool output: %#v", event)
+	}
+}
+
+func TestUnlistedSearchResponseRowsReportOmissions(t *testing.T) {
+	const webSearch = `{"type":"web_search_call","id":"fictional-search","status":"completed","action":{"type":"search","query":"fictional"}}`
+	for _, mode := range []string{"legacy", "paginated"} {
+		for _, tc := range []struct {
+			name, payload string
+			completed     bool
+		}{
+			{name: "web_search_call", payload: webSearch},
+			{name: "tool_search_call", payload: `{"type":"tool_search_call","execution":"server","call_id":null,"arguments":{"paths":["fictional"]}}`},
+			{name: "tool_search_output", payload: `{"type":"tool_search_output","execution":"server","call_id":null,"status":"completed","tools":[]}`},
+			{name: "web_search_with_completed_item", payload: webSearch, completed: true},
+		} {
+			if tc.completed && mode == "legacy" {
+				continue
+			}
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				home := t.TempDir()
+				message := `{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"agent_message","message":"Fictional message"}}`
+				if mode == "paginated" {
+					message = `{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"fictional-message","content":[{"type":"Text","text":"Fictional message"}]}}}`
+				}
+				rows := []string{
+					header(testThreadID, "0.156.1", mode, ""),
+					message,
+					fmt.Sprintf(`{"timestamp":"2026-09-03T10:00:01Z","type":"response_item","payload":%s}`, tc.payload),
+				}
+				wantOmissions := 1
+				if tc.completed {
+					rows = append(rows, `{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"fictional-search","query":"fictional","action":{"type":"search","query":"fictional"}}}}`)
+					wantOmissions++
+				}
+				if mode == "paginated" {
+					for i := range rows {
+						rows[i] = withOrdinal(i, rows[i])
+					}
+				}
+				writeRollout(t, rolloutPath(home, "sessions", testThreadID), rows)
+				runner := cli.Runner{Version: "test", Registry: provider.NewRegistry(New())}
+				listed := runCLI(t, runner, "list", "--provider", "codex", "--root", home)
+				if listed.Data == nil || listed.Data.Sources == nil || len(*listed.Data.Sources) != 1 {
+					t.Fatalf("list = %#v", listed)
+				}
+				source := (*listed.Data.Sources)[0]
+				if source.LastInteractionAt == nil || *source.LastInteractionAt != "2026-09-03T10:00:01Z" {
+					t.Fatalf("Search time missing from list: %#v", source)
+				}
+				ref := source.Identity.SourceRef
+				before := runCLI(t, runner, "verify", "--root", home, ref)
+				result := runCLI(t, runner, "events", "--root", home, ref)
+				after := runCLI(t, runner, "verify", "--root", home, ref)
+				if result.Status != contract.StatusPartial || countOmissions(result.Omissions, "unsupported_event") != wantOmissions || result.Data == nil || result.Data.Events == nil {
+					t.Fatalf("events = %#v", result)
+				}
+				events := *result.Data.Events
+				if len(events) != 1 || events[0].Message == nil || events[0].Message.Text != "Fictional message" {
+					t.Fatalf("Expected only the supported message: %#v", events)
+				}
+
+				wantVersion, err := contract.VerifiedVersion([]contract.EvidenceChunk{
+					{Name: "rollout/primary.jsonl", Content: []byte(strings.Join(rows, "\n") + "\n")},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, verified := range []contract.Envelope{before, after} {
+					if verified.Status != contract.StatusComplete || len(verified.Omissions) != 0 || verified.Data == nil ||
+						verified.Data.VerifiedVersion == nil || *verified.Data.VerifiedVersion != wantVersion {
+						t.Fatalf("Expected verification of all stored rows: %#v", verified)
+					}
+				}
+			})
+		}
 	}
 }
 

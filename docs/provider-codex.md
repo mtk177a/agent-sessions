@@ -339,6 +339,9 @@ The adapter cannot establish whether these rows duplicate completed items in tha
 
 **Rows outside the public event model**
 
+For legacy and paginated version and mode combinations absent from the compatibility table, `events` reports `web_search_call`, `tool_search_call`, and `tool_search_output` response rows as `unsupported_event` omissions.\
+`verify` includes these recognized rows in the verified version of the selected history.
+
 For `0.153.0`, `token_usage_record` is bookkeeping.\
 An encountered `realtime_item` remains incomplete because its interaction meaning is not normalized.
 

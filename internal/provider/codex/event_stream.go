@@ -17,7 +17,8 @@ func newEventNormalizer(threadID string) *eventNormalizer {
 }
 
 func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
-	profile := contentRowProfile(origin, line)
+	compatibility := contentRowCompatibility(origin, line)
+	profile := compatibility.profile
 	if profile == profileUnsupported {
 		n.omissions = append(n.omissions, omission("unknown_format", "events", "A Codex JSONL row or payload type was not recognized for its stored format."))
 		return
@@ -46,21 +47,20 @@ func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
 		case "error":
 			n.events = append(n.events, contract.Event{Kind: contract.EventError, Error: &contract.ErrorEvent{Category: "provider", Message: event.Message}, Metadata: []contract.Metadata{}})
 		case "item_completed":
-			if profile == profileLegacy {
-				return
-			}
 			var item completedItem
 			if json.Unmarshal(event.Item, &item) != nil {
 				n.omissions = append(n.omissions, omission("malformed_record", "events", "A completed Codex item could not be decoded."))
 				return
 			}
+			if profile == profileLegacy && item.Type != "FunctionCallOutput" {
+				return
+			}
 			n.completed(profile, item, event.Item)
 		}
 	case "response_item":
-		if profile == profileNativePaginated {
-			return
+		if profile != profileNativePaginated || compatibility.forward {
+			n.response(profile, line.Payload)
 		}
-		n.legacyResponse(line.Payload)
 	}
 	for i := before; i < len(n.events); i++ {
 		contract.SetEventTime(&n.events[i], line.Timestamp)
@@ -126,7 +126,7 @@ func (n *eventNormalizer) completed(profile storageProfile, item completedItem, 
 	}
 }
 
-func (n *eventNormalizer) legacyResponse(raw json.RawMessage) {
+func (n *eventNormalizer) response(profile storageProfile, raw json.RawMessage) {
 	var item struct {
 		Type   string `json:"type"`
 		Name   string `json:"name"`
@@ -134,6 +134,15 @@ func (n *eventNormalizer) legacyResponse(raw json.RawMessage) {
 	}
 	if json.Unmarshal(raw, &item) != nil {
 		n.omissions = append(n.omissions, omission("malformed_record", "events", "A Codex response row could not be decoded."))
+		return
+	}
+	if profile == profileNativePaginated {
+		// For an unlisted paginated profile, raw tool rows may be the only
+		// record of an execution or may duplicate a completed item.
+		switch item.Type {
+		case "function_call", "custom_tool_call", "local_shell_call", "function_call_output", "custom_tool_call_output":
+			n.omissions = append(n.omissions, omission("unsupported_event", "events", "A Codex tool response row could not be safely distinguished from a completed item."))
+		}
 		return
 	}
 	switch item.Type {

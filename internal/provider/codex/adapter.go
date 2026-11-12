@@ -237,7 +237,7 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 	omissions := []contract.Omission{}
 	compatibility := contentCompatibility(selected.meta.CLIVersion, selected.meta.HistoryMode)
 	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, compatibility.requireOrdinals, func(origin artifact, line rolloutLine) {
-		if contentRowProfile(origin, line) == profileUnsupported {
+		if contentRowCompatibility(origin, line).profile == profileUnsupported {
 			omissions = append(omissions, omission("unknown_format", "verification", "A Codex row was not recognized for its stored format."))
 		}
 	})

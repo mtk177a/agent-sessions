@@ -95,6 +95,54 @@ func TestUnlistedLegacyNormalizesToolRows(t *testing.T) {
 	}
 }
 
+func TestUnlistedPaginatedReportsOmittedRawToolRows(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("completed=%t", completed), func(t *testing.T) {
+			home := t.TempDir()
+			rows := []string{
+				withOrdinal(0, header(testThreadID, "0.143.0", "paginated", "")),
+				withOrdinal(1, completedMessage("2026-09-03T10:00:00Z", "AgentMessage")),
+				withOrdinal(2, `{"timestamp":"2026-09-03T10:00:01Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}","call_id":"fictional-call"}}`),
+				withOrdinal(3, `{"timestamp":"2026-09-03T10:00:02Z","type":"response_item","payload":{"type":"function_call_output","call_id":"fictional-call","output":"Fictional output"}}`),
+			}
+			wantEvents := 1
+			if completed {
+				rows = append(rows, withOrdinal(4, `{"timestamp":"2026-09-03T10:00:03Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"fictional-item","command":["echo","Fictional output"],"cwd":"file:///fictional","parsed_cmd":[],"source":"agent","status":"completed","exit_code":0,"aggregated_output":"Fictional output"}}}`))
+				wantEvents = 3
+			}
+			writeRollout(t, rolloutPath(home, "sessions", testThreadID), rows)
+
+			result := New().Events(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+			if result.Status != contract.StatusPartial || len(result.Events) != wantEvents || countOmissions(result.Omissions, "unsupported_event") != 2 {
+				t.Fatalf("Events() = %#v", result)
+			}
+			if completed && (result.Events[1].ToolCall == nil || result.Events[2].ToolResult == nil || result.Events[2].ToolResult.CallID != result.Events[1].ToolCall.CallID) {
+				t.Fatalf("Expected one correlated execution from the completed item: %#v", result.Events)
+			}
+		})
+	}
+}
+
+func TestUnlistedLegacyRetainsCompletedFunctionCallOutput(t *testing.T) {
+	home := t.TempDir()
+	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{
+		header(testThreadID, "0.167.0", "legacy", ""),
+		`{"timestamp":"2026-09-03T10:00:00Z","type":"event_msg","payload":{"type":"agent_message","message":"Before output"}}`,
+		`{"timestamp":"2026-09-03T10:00:01Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"FunctionCallOutput","id":"fictional-output","name":"fictional-tool","output":"Fictional output"}}}`,
+	})
+	result := New().Events(context.Background(), testSource(home), contract.SourceFingerprint(testThreadID))
+	if result.Status != contract.StatusPartial || len(result.Events) != 2 || !hasOmission(result.Omissions, "tool_outcome_unknown") {
+		t.Fatalf("Events() = %#v", result)
+	}
+	event := result.Events[1]
+	output := event.ToolResult
+	if output == nil || output.Content == nil || output.Content.Text != "Fictional output" ||
+		output.Outcome != "unknown" || output.CallID != "" || output.CorrelationState != "unmatched" || event.RecordedAt != "2026-09-03T10:00:01Z" ||
+		len(event.Metadata) != 1 || event.Metadata[0].Name != "tool_name" || event.Metadata[0].Value != "fictional-tool" {
+		t.Fatalf("Expected standalone recorded tool output: %#v", event)
+	}
+}
+
 func TestFutureCodexVersionUsesStructurallyCompatibleTimeProfile(t *testing.T) {
 	home := t.TempDir()
 	writeRollout(t, rolloutPath(home, "sessions", testThreadID), []string{

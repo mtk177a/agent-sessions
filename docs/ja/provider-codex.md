@@ -340,6 +340,9 @@ Codex の Git URL、ブランチ、コミットではローカル clone を識�
 | Native paginated | 完了済みの `UserMessage`、`AgentMessage`、`CommandExecution`、`McpToolCall`、`DynamicToolCall` を基準とする。下位レベルの応答行は重ねて出力しない。 |
 | Canonicalized legacy paginated | 完了済みメッセージ項目を基準とする。ツール呼び出しと結果の対応には旧形式の応答行を使い、完了済みツール項目は重ねて出力しない。 |
 
+互換性一覧にない版と履歴方式の組み合わせで `paginated` を読む場合、`events` は legacy の読み取り規則で正規化できるツール呼び出しと結果の応答行を、行ごとに欠落として報告する。\
+これらの行が、その履歴の完了済み項目と重複するかどうかは確定できない。
+
 **公開イベントにしない行**
 
 `0.153.0` の `token_usage_record` は管理用の記録である。\
@@ -396,14 +399,13 @@ MCP の文章と `structuredContent` は両方保持し、動的なツールの 
 複数の文章ブロックは順序を保った JSON 配列とし、非テキスト部分や未対応の部分は省略として報告する。\
 既知のエラー欄は保持し、通常の出力と併存する場合は `output` と `error` を持つ JSON とする。
 
-native paginated 履歴の確認済みの `FunctionCallOutput` も本文を保持する。
+legacy と native paginated の履歴にある完了済みの `FunctionCallOutput` も本文を保持する。
 
 **呼び出しとの対応**
 
 対応付けは選択した論理履歴全体で行い、対応先がない、または識別子が重複した結果も本文を保持する。
 
-native paginated 履歴の `FunctionCallOutput` の項目 ID は、呼び出しとの対応を確定しない。\
-これらの項目は独立した結果として扱う。
+完了済みの `FunctionCallOutput` は、項目 ID から呼び出しとの対応を確定できないため、独立した結果として扱う。
 
 **成否**
 
@@ -412,11 +414,11 @@ native paginated 履歴の `FunctionCallOutput` の項目 ID は、呼び出し�
 
 旧形式の出力行には内部の成功値が保存されないため、本文を保持し、`outcome: unknown` を返す。
 
-native paginated 履歴の独立した `FunctionCallOutput` の成否も不明とする。
+独立した `FunctionCallOutput` の成否も不明とする。
 
 **メタデータ**
 
-native paginated 履歴の独立した `FunctionCallOutput` に記録された名前は、`tool_name` メタデータに保持する。
+独立した `FunctionCallOutput` に記録された名前は、`tool_name` メタデータに保持する。
 
 ##### プロバイダーエラーイベント
 

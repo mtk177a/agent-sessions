@@ -102,12 +102,12 @@ func contentCompatibility(version, historyMode string) historyCompatibility {
 	}
 }
 
-func contentRowProfile(origin artifact, line rolloutLine) storageProfile {
+func contentRowCompatibility(origin artifact, line rolloutLine) historyCompatibility {
 	compatibility := contentCompatibility(origin.meta.CLIVersion, origin.meta.HistoryMode)
 	if validRowForProfile(compatibility.profile, origin.meta.CLIVersion, line, compatibility.forward) {
-		return compatibility.profile
+		return compatibility
 	}
-	return profileUnsupported
+	return historyCompatibility{}
 }
 
 func supportsTokenUsageRecord(value string) bool {

@@ -334,6 +334,9 @@ The history profile determines which rows become public events:
 | Native paginated | Completed `UserMessage`, `AgentMessage`, `CommandExecution`, `McpToolCall`, and `DynamicToolCall` items are canonical. Lower-level response rows are not emitted again. |
 | Canonicalized legacy paginated | Completed message items are canonical. Legacy response rows provide tool call/result correlation; completed tool items are not emitted again. |
 
+For paginated version and mode combinations absent from the compatibility table, `events` reports an omission for each lower-level tool call or result row that the legacy reader can normalize.\
+The adapter cannot establish whether these rows duplicate completed items in that history.
+
 **Rows outside the public event model**
 
 For `0.153.0`, `token_usage_record` is bookkeeping.\
@@ -389,14 +392,13 @@ MCP text and `structuredContent` are both retained; dynamic `inputText` and lega
 Multiple text blocks use an ordered JSON array; non-text and unsupported portions are reported as omissions.\
 Known error fields are retained and, when output also exists, represented as JSON with `output` and `error`.
 
-Verified native paginated `FunctionCallOutput` items also retain their bodies.
+Completed `FunctionCallOutput` items in legacy and native paginated history also retain their bodies.
 
 **Call relationship**
 
 Correlation is resolved over the selected logical history; unmatched or duplicate-identifier results retain their bodies.
 
-Item IDs of native paginated `FunctionCallOutput` records do not establish call correlation.\
-These items remain standalone results.
+Completed `FunctionCallOutput` items are standalone results because their item IDs do not establish call correlation.
 
 **Outcome**
 
@@ -405,11 +407,11 @@ If these do not establish an outcome, it is `unknown`; text such as `PASS` never
 
 Legacy output rows do not persist the internal success value, so the adapter retains their bodies with `outcome: unknown`.
 
-Standalone native paginated `FunctionCallOutput` results also have unknown outcomes.
+Standalone `FunctionCallOutput` results also have unknown outcomes.
 
 **Metadata**
 
-The recorded name of a standalone native paginated `FunctionCallOutput` is retained in `tool_name` metadata.
+The recorded name of a standalone `FunctionCallOutput` is retained in `tool_name` metadata.
 
 ##### Provider error events
 

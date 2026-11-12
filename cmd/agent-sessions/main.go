@@ -17,5 +17,5 @@ func main() {
 }
 
 func newRunner() cli.Runner {
-	return cli.Runner{Version: buildinfo.Version, Registry: provider.NewRegistry(claude.New(), chatgpt.New(), codex.New())}
+	return cli.Runner{Version: buildinfo.ExecutableVersion(), Registry: provider.NewRegistry(claude.New(), chatgpt.New(), codex.New())}
 }

@@ -5,7 +5,7 @@
 > 内容に差異がある場合は英語版を優先する。
 
 この文書では、`codex` アダプターで保存済みのセッション記録を読み取る方法と、出力の読み方を説明する。\
-アダプターは、Codex App Server を起動せずに保存済みロールアウトを読み取る。
+アダプターは、Codex がセッション履歴を保存したファイル（ロールアウト）を、Codex App Server を起動せずに読み取る。
 
 JSON 応答の共通フィールドは [CLI 仕様](cli-json-contract.md) を参照する。
 
@@ -82,15 +82,15 @@ agent-sessions events --root /fictional/codex-home '<source_ref from list>'
 
 ## 対応形式
 
-保存済みの `legacy` と `paginated` の履歴は、CLI 版が [アダプターの互換性一覧](../../internal/provider/codex/compatibility.go) にない場合も、`events` と `verify` で読み取れる。
+保存済みの `legacy` と `paginated` の履歴は、Codex CLI のバージョンが [アダプターの互換性一覧](../../internal/provider/codex/compatibility.go) にない場合も、`events` と `verify` で読み取れる。
 
 | 操作 | 対応範囲 |
 | --- | --- |
-| `events` と `verify` | 一覧にある版と履歴方式の組み合わせには、確認済みの読み取り規則を適用する。それ以外は、保存された履歴方式と既知の行構造に基づいて読み取る。 |
-| `list` と `show` の時刻取得 | 一覧にある組み合わせと、すべての採用行が既知の構造を保つ、構文上有効な `0.155.0` 以降の版。 |
+| `events` と `verify` | 一覧にあるバージョンと履歴モードの組み合わせには、確認済みの読み取り規則を適用する。一覧にない組み合わせでは、保存された履歴モードに従い、既知の構造に合う行を読み取る。 |
+| `list` と `show` の時刻取得 | 一覧にある組み合わせに対応する。`0.155.0` 以降も、バージョン番号の書式が正しく、読み取り対象のすべての行が既知の構造に合う場合は対応する。 |
 
-履歴の順序と範囲を確定できる場合、`events` は読み取れるイベントを保存順に返し、解釈できない行を欠落として報告する。\
-`verify` はその行を欠落として報告し、検証済みバージョンの算出にはその行のバイト列も含める。\
+履歴の順序と範囲を確定できる場合、`events` は読み取れるイベントを保存順に返し、認識できない行があったことを `omissions` で報告する。\
+`verify` も同じ理由を `omissions` で報告し、その行のバイト列を検証済みバージョンの算出に含める。\
 順序や継承する範囲を確定できない場合は、どちらの操作も `unsupported` を返す。
 
 `events` が一部のイベントを返せる場合でも、未知の行や不正な時刻があると最後のやり取りの時刻を確定できないことがある。
@@ -142,7 +142,7 @@ agent-sessions events --root /fictional/codex-home '<source_ref from list>'
 - JSONL が不正、または行がサイズ上限を超えている。
 - 対応関係やツール結果が欠けている、または呼び出し ID が重複している。
 - 関係識別子が不正である。
-- 要求された操作が対応していない版である。
+- 要求された操作が、その Codex のバージョンに対応していない。
 
 公開イベント形式で表せない既知の項目は、引き続き明示的な省略として報告する。
 
@@ -175,7 +175,7 @@ Codex アダプターの入力には、次の上限を設ける。
 
 ## アダプターの仕様（保守者向け）
 
-ロールアウトの JSONL は、版に依存するアダプター入力であり、安定した公開 API ではない。\
+ロールアウトの JSONL は、Codex のバージョンに依存するアダプター入力であり、安定した公開 API ではない。\
 これらの規則を変えるときは、共通の [アダプターの保守上の制約](architecture.md#保守) に従う。
 
 ### 記録の読み取り
@@ -192,20 +192,21 @@ Codex アダプターの入力には、次の上限を設ける。
 **対応形式**
 
 アダプターは legacy、native paginated、canonicalized legacy paginated の履歴を区別する。\
-[アダプターの互換性一覧](../../internal/provider/codex/compatibility.go) は、観測した版と履歴方式の組み合わせごとに読み取り規則を定める。
+[アダプターの互換性一覧](../../internal/provider/codex/compatibility.go) は、確認したバージョンと履歴モードの組み合わせごとに読み取り規則を定める。
 
-canonicalized legacy paginated 形式は、確認済みの移行後版名 `0.92.0`、`0.94.0`、`0.94.0-alpha.10`、`0.95.0-alpha.3`、`0.98.0`、`0.99.0-alpha.5`、`0.101.0`、`0.117.0`、`0.118.0`、`0.139.0`、`0.142.5`、`0.144.2` を対象とする。
+canonicalized legacy paginated の読み取り規則は、旧形式からページ分割形式へ移行した履歴で確認した。\
+対象となる履歴のヘッダーに記録された CLI バージョンは、`0.92.0`、`0.94.0`、`0.94.0-alpha.10`、`0.95.0-alpha.3`、`0.98.0`、`0.99.0-alpha.5`、`0.101.0`、`0.117.0`、`0.118.0`、`0.139.0`、`0.142.5`、`0.144.2` である。
 
-Codex の [旧形式からページ分割形式への移行処理](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs) は、保存行を書き換えるとき、ヘッダーの CLI 版を保持する。\
+Codex の [旧形式からページ分割形式への移行処理](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs) は、保存行を書き換えるとき、ヘッダーに記録された CLI バージョンを保持する。\
 確認済みの移行履歴では、旧形式の応答行からツール呼び出しと結果を取得し、完了済み項目から同じ実行を重ねて出力することを防ぐ。
 
 **構造の検査**
 
-一覧にない組み合わせでは、履歴方式が `legacy` または省略されていれば legacy の読み取り規則を使い、`paginated` なら native paginated の読み取り規則を使う。\
-採用する各行について、その規則が認識する行の種類と必須の JSON フィールドを確認する。\
+一覧にない組み合わせで `events` と `verify` を実行するときは、記録された履歴モード（`history_mode`）が `legacy` か未指定なら legacy の読み取り規則を使い、`paginated` なら native paginated の読み取り規則を使う。\
+読み取り対象の各行について、その規則が認識する行の種類と必須の JSON フィールドを確認する。\
 フィールドの追加は許容する。
 
-一覧にない `paginated` の履歴と、確認済みの移行履歴では、行番号の連続性が必須である。\
+一覧にない `paginated` の履歴と、確認済みの移行履歴では、各行に記録された `ordinal` の値が連続していなければならない。\
 canonicalized legacy paginated 形式では、移行履歴で確認した行の種類も検査する。
 
 ### 論理履歴の構成
@@ -214,7 +215,7 @@ canonicalized legacy paginated 形式では、移行履歴で確認した行の�
 
 #### 現在のロールアウトの選択
 
-同じスレッドを表す成果物が複数ある場合、アダプターはタイムスタンプとロールアウト ID による Codex の現在のロールアウト選択順序に従う。\
+同じスレッドのロールアウトファイルが複数ある場合、アダプターはタイムスタンプとロールアウト ID による Codex の現在のロールアウト選択順序に従う。\
 その順序で現在の記録を区別できない場合、内容に関する操作は、どれか一つを選ばず `unsupported` を返す。
 
 #### 継承部分の解決
@@ -233,11 +234,12 @@ canonicalized legacy paginated 形式では、移行履歴で確認した行の�
 
 識別子の検出では、サイズ制限内の最初の JSONL レコードを読み取る。
 
-`session_meta.payload.id` フィールドはプロバイダー固有のスレッド識別子なので、成果物をアクティブな場所とアーカイブ済みの場所の間で移動しても `source_ref` は変わらない。
+`session_meta.payload.id` フィールドはプロバイダー固有のスレッド識別子なので、ロールアウトファイルをアクティブな場所とアーカイブ済みの場所の間で移動しても `source_ref` は変わらない。
 
 #### バージョンヒント
 
-このヒントは変更検出の目安であり、検証済みのソース版ではない。
+`version_hint` は、記録が変わった可能性を調べるための値である。\
+内容の検証には `verify` が返す `verified_version` を使う。
 
 **ヒントの算出**
 
@@ -269,17 +271,17 @@ canonicalized legacy paginated 形式では、移行履歴で確認した行の�
 
 この時刻の対象は、[論理履歴](#論理履歴の構成) に含まれる記録だけである。
 
-##### 対応する版と構造の条件
+##### 対応バージョンと行構造の条件
 
-やり取り時刻のデコードでは、構文上有効な `0.155.0` 以降の版も、採用するすべてのロールアウトが既知の `legacy` または native `paginated` 構造に一致する場合に受け付ける。\
-この前方互換の境界に版の上限は設けない。\
-将来版の paginated 記録では行番号の連続性を必須とし、採用するすべての行が、既知のメッセージ、ツール、応答、ライフサイクル、管理用の形式に一致しなければならない。\
+やり取りの時刻は、`0.155.0` 以降も、バージョン番号の書式が正しく、読み取り対象のすべてのロールアウトが既知の `legacy` または native `paginated` の構造に合う場合に読み取る。\
+この条件では、バージョンの上限を設けない。\
+新しいバージョンの paginated 記録では、`ordinal` の値が連続し、読み取り対象のすべての行が、既知のメッセージ、ツール、応答、ライフサイクル、管理用の形式のいずれかに合う必要がある。\
 やり取りとして時刻を進める既知のイベント行と応答行は、既知の構造で必須となる最上位フィールドと JSON 型を維持しなければならないが、フィールドの追加は許容する。
 
 ##### 記録の種類ごとの時刻判定
 
 記録の種類ごとの時刻への影響を次に示す。\
-いずれも、前述の形式・版・構造の対応条件を満たす必要がある。
+いずれも、前述の履歴形式、バージョン、行構造の条件を満たす必要がある。
 
 | 記録 | ソースの時刻への影響 |
 | --- | --- |
@@ -308,7 +310,7 @@ Canonicalized legacy paginated ロールアウトでは、観測済みのメッ�
 
 `list` と `show` は `session_meta.payload.cwd`、`turn_context.payload.cwd`、完了した `CommandExecution.cwd`、記録された従来の `local_shell_call.action.cwd` を読む。\
 コマンド文字列を解析せず、共通の `session`、`turn`、`tool` の根拠にする。\
-作業場所の取得には、将来版の構造の検査を含め、やり取り時刻の対応条件を使う。
+作業ディレクトリを取得する際は、やり取りの時刻と同じ対応条件を使い、新しいバージョンについても行構造を検査する。
 
 `CommandExecution.cwd` は `PathUri` 形式で記録される。\
 アダプターはローカルの `file:` URI を実行環境のパス形式に従う絶対パスへ変換し、絶対パスで記録された値も受け付ける。\
@@ -340,7 +342,7 @@ Codex の Git URL、ブランチ、コミットではローカル clone を識�
 | Native paginated | 完了済みの `UserMessage`、`AgentMessage`、`CommandExecution`、`McpToolCall`、`DynamicToolCall` を基準とする。下位レベルの応答行は重ねて出力しない。 |
 | Canonicalized legacy paginated | 完了済みメッセージ項目を基準とする。ツール呼び出しと結果の対応には旧形式の応答行を使い、完了済みツール項目は重ねて出力しない。 |
 
-互換性一覧にない版と履歴方式の組み合わせで `paginated` を読む場合、`events` は legacy の読み取り規則で正規化できるツール呼び出しと結果の応答行を、行ごとに欠落として報告する。\
+互換性一覧にないバージョンと履歴モードの組み合わせで `paginated` の履歴を読む場合、`events` は、legacy の読み取り規則でツール呼び出しや結果として正規化できる下位レベルの応答行を、1 行ずつ `omissions` で報告する。\
 これらの行が、その履歴の完了済み項目と重複するかどうかは確定できない。
 
 **公開イベントにしない行**
@@ -456,18 +458,18 @@ JSONL の行のデコードは、保存された行が安定した公開 API で
 native paginated 形式の項目と応答の保存規則は、対応する公式実装の [`0.147.0`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/rollout/src/policy.rs)、[`0.148.0-alpha.9`](https://github.com/openai/codex/blob/rust-v0.148.0-alpha.9/codex-rs/rollout/src/policy.rs) などと、保存済みロールアウトの構造に対する上限付きの調査で確認した。\
 元の [`0.98.0`](https://github.com/openai/codex/blob/rust-v0.98.0/codex-rs/protocol/src/protocol.rs) と [`0.117.0`](https://github.com/openai/codex/blob/rust-v0.117.0/codex-rs/protocol/src/protocol.rs) の形式には、ページ分割形式の行番号がなかった。
 
-#### 確認した版
+#### 確認したバージョン
 
-**CLI の版**
+**CLI のバージョン**
 
 確認に使用した資料には、公式の `openai/codex` タグ [`rust-v0.149.1`](https://github.com/openai/codex/tree/rust-v0.149.1) のコミット [`ff29a44391deccde0aba0f8390337d7f3c319ea4`](https://github.com/openai/codex/commit/ff29a44391deccde0aba0f8390337d7f3c319ea4) がある。
 
 `0.153.0` の境界は、公式の [`rust-v0.153.0` の履歴実装](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs) に対して確認した。
 
-一覧にあるこれらの版は、公式の [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs)、[`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs)、[`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs)、[`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) の項目定義と、保存済みロールアウトの構造に対する上限付き・読み取り専用の調査で確認した。\
+一覧にあるこれらのバージョンは、公式の [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs)、[`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs)、[`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs)、[`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) の項目定義と、保存済みロールアウトの構造に対する上限付き・読み取り専用の調査で確認した。\
 非公開の本文や識別子は、このリポジトリへ複製していない。
 
-**App の版**
+**App のビルドバージョン**
 
-Codex App のビルド版は、公式の [`0.154.0-alpha.6.2`](https://github.com/openai/codex/blob/rust-v0.154.0-alpha.6.2/codex-rs/protocol/src/items.rs) と [`0.155.0-alpha.9.2`](https://raw.githubusercontent.com/openai/codex/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) の項目定義、および保存済みロールアウトの構造に対して確認した。\
-`0.155.0-alpha.9.2` では、観測された 2 種類の履歴方式を調べた。
+Codex App のビルドバージョンは、公式の [`0.154.0-alpha.6.2`](https://github.com/openai/codex/blob/rust-v0.154.0-alpha.6.2/codex-rs/protocol/src/items.rs) と [`0.155.0-alpha.9.2`](https://raw.githubusercontent.com/openai/codex/4607249e430dac1c961df4dc615beae88e33cec8/codex-rs/protocol/src/items.rs) の項目定義、および保存済みロールアウトの構造に対して確認した。\
+`0.155.0-alpha.9.2` では、観測された 2 種類の履歴モードを調べた。

@@ -29,7 +29,7 @@ func TestVersionFlag(t *testing.T) {
 func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	configJSON := `{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
+	configJSON := `{"sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -60,14 +60,11 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 			if exit != tc.wantExit {
 				t.Fatalf("exit = %d, want %d; output=%s", exit, tc.wantExit, output.String())
 			}
-			var envelope contract.Envelope
-			if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
-				t.Fatalf("invalid JSON: %v; output=%s", err, output.String())
-			}
+			envelope := decodeCurrentResponse(t, output.Bytes())
 			if envelope.Operation != tc.wantOperation || envelope.Status != tc.wantStatus {
 				t.Fatalf("unexpected envelope: %#v", envelope)
 			}
-			if envelope.SchemaVersion != "v2" || envelope.CLIVersion != "test" || envelope.Omissions == nil {
+			if envelope.CLIVersion != "test" || envelope.Omissions == nil {
 				t.Fatalf("stable envelope fields are missing: %#v", envelope)
 			}
 			switch tc.name {
@@ -116,25 +113,36 @@ func TestFourOperationJSONContractAndReadOnlyBehavior(t *testing.T) {
 	}
 }
 
-func TestEventsRejectMissingV2ContentState(t *testing.T) {
+func TestEventsRejectMissingInputState(t *testing.T) {
 	events := newSyntheticAdapter().events
 	events[1].ToolCall.InputState = ""
 	if err := normalizeAndValidateEvents(events); err == nil {
-		t.Fatal("v1-style missing input state accepted")
+		t.Fatal("missing input state accepted")
 	}
 }
 
 func TestStructuredErrorsAndExitCodes(t *testing.T) {
 	runner := Runner{Version: "test", Registry: provider.NewRegistry()}
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	legacyPath := filepath.Join(dir, "legacy.json")
+	if err := os.WriteFile(configPath, []byte(`{"sources":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`{"schema_version":"v1","sources":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		args       []string
 		wantExit   int
 		wantStatus contract.Status
+		wantCode   string
 	}{
-		{[]string{"unknown"}, ExitUsage, contract.StatusError},
-		{[]string{"list", "--provider", "missing"}, ExitUnsupported, contract.StatusUnsupported},
-		{[]string{"events", "not-a-ref"}, ExitUsage, contract.StatusError},
-		{[]string{"list", "--limit", "101"}, ExitUsage, contract.StatusError},
+		{[]string{"unknown"}, ExitUsage, contract.StatusError, "unknown_command"},
+		{[]string{"list", "--config", configPath, "--provider", "missing"}, ExitUnsupported, contract.StatusUnsupported, ""},
+		{[]string{"events", "not-a-ref"}, ExitUsage, contract.StatusError, "invalid_source_ref"},
+		{[]string{"list", "--limit", "101"}, ExitUsage, contract.StatusError, "invalid_pagination"},
+		{[]string{"list", "--config", legacyPath}, ExitUsage, contract.StatusError, "invalid_configuration"},
 	}
 	for _, tc := range cases {
 		var output bytes.Buffer
@@ -142,23 +150,36 @@ func TestStructuredErrorsAndExitCodes(t *testing.T) {
 		if exit != tc.wantExit {
 			t.Fatalf("args=%v exit=%d want=%d output=%s", tc.args, exit, tc.wantExit, output.String())
 		}
-		var envelope contract.Envelope
-		if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
-			t.Fatal(err)
-		}
+		envelope := decodeCurrentResponse(t, output.Bytes())
 		if envelope.Status != tc.wantStatus {
 			t.Fatalf("args=%v status=%s want=%s", tc.args, envelope.Status, tc.wantStatus)
 		}
-		if envelope.Status == contract.StatusError && envelope.Error == nil {
-			t.Fatal("error response lacks structured error")
+		if tc.wantCode != "" && (envelope.Error == nil || envelope.Error.Code != tc.wantCode) {
+			t.Fatalf("args=%v error=%#v want code=%s", tc.args, envelope.Error, tc.wantCode)
 		}
 	}
+}
+
+func decodeCurrentResponse(t *testing.T, output []byte) contract.Envelope {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(output, &fields); err != nil {
+		t.Fatalf("invalid JSON response: %v; output=%s", err, output)
+	}
+	if _, exists := fields["schema_version"]; exists {
+		t.Fatalf("response contains schema_version: %s", output)
+	}
+	var envelope contract.Envelope
+	if err := json.Unmarshal(output, &envelope); err != nil {
+		t.Fatalf("invalid response envelope: %v; output=%s", err, output)
+	}
+	return envelope
 }
 
 func TestProviderArchiveErrorsRemainDistinct(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	if err := os.WriteFile(configPath, []byte(`{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":`+quoted(root)+`}]}`), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`{"sources":[{"id":"synthetic-default","provider":"synthetic","root":`+quoted(root)+`}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -191,7 +212,7 @@ func TestProviderArchiveErrorsRemainDistinct(t *testing.T) {
 func TestVerifyAcceptsPrecomputedProviderContentVersion(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	if err := os.WriteFile(configPath, []byte(`{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":`+quoted(root)+`}]}`), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`{"sources":[{"id":"synthetic-default","provider":"synthetic","root":`+quoted(root)+`}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	adapter := newSyntheticAdapter()
@@ -216,7 +237,7 @@ func TestVerifyAcceptsPrecomputedProviderContentVersion(t *testing.T) {
 func TestUnsupportedAdapterResultForEveryOperation(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	configJSON := `{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
+	configJSON := `{"sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +404,7 @@ func TestStructuralOutputBoundFailsClosed(t *testing.T) {
 func TestEventsRejectEventCountBeyondBound(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
-	configJSON := `{"schema_version":"v1","sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
+	configJSON := `{"sources":[{"id":"synthetic-default","provider":"synthetic","root":` + quoted(root) + `}]}`
 	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}

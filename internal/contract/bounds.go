@@ -16,7 +16,7 @@ var ErrStructuralStringBound = errors.New("structural output string exceeds boun
 
 func EnforceBounds(envelope *Envelope) error {
 	changed := false
-	for _, value := range []string{envelope.SchemaVersion, envelope.Operation, string(envelope.Status)} {
+	for _, value := range []string{envelope.Operation, string(envelope.Status)} {
 		if err := requireBoundedString(value); err != nil {
 			return err
 		}

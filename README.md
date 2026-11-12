@@ -155,8 +155,7 @@ See [command syntax and options](docs/cli-json-contract.md#calling-commands) for
 
 ### Process JSON responses
 
-The session commands return one JSON object with the stable `v2` response schema.\
-Make sure that `schema_version` is `v2` before you interpret other response fields.
+The session commands return one JSON object in the [current response format](docs/cli-json-contract.md#json-response-structure).
 
 Use these fields to identify incomplete results and find the next page:
 
@@ -178,7 +177,7 @@ See [pagination and omissions](docs/cli-json-contract.md#completeness) for detai
 - The tool reports unsupported content or formats explicitly.
 - Pagination cannot return the rest of a message or tool body that the tool has truncated.
 
-If your integration uses v1, read [Updating a v1 consumer](docs/cli-json-contract.md#updating-a-v1-consumer) before you upgrade it.
+If your configuration or response reader uses `schema_version`, follow the [upgrade steps](docs/cli-json-contract.md#upgrade-an-existing-integration).
 
 ### Handle recorded content
 

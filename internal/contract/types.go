@@ -6,10 +6,6 @@ import (
 	"fmt"
 )
 
-const (
-	SchemaVersion = "v2"
-)
-
 type Status string
 
 const (
@@ -20,14 +16,13 @@ const (
 )
 
 type Envelope struct {
-	SchemaVersion string       `json:"schema_version"`
-	CLIVersion    string       `json:"cli_version"`
-	Operation     string       `json:"operation"`
-	Status        Status       `json:"status"`
-	Data          *Data        `json:"data,omitempty"`
-	Page          *Page        `json:"page,omitempty"`
-	Omissions     []Omission   `json:"omissions"`
-	Error         *PublicError `json:"error,omitempty"`
+	CLIVersion string       `json:"cli_version"`
+	Operation  string       `json:"operation"`
+	Status     Status       `json:"status"`
+	Data       *Data        `json:"data,omitempty"`
+	Page       *Page        `json:"page,omitempty"`
+	Omissions  []Omission   `json:"omissions"`
+	Error      *PublicError `json:"error,omitempty"`
 }
 
 type Data struct {
@@ -224,18 +219,14 @@ type PublicError struct {
 
 func NewEnvelope(operation, cliVersion string, status Status) Envelope {
 	return Envelope{
-		SchemaVersion: SchemaVersion,
-		CLIVersion:    cliVersion,
-		Operation:     operation,
-		Status:        status,
-		Omissions:     []Omission{},
+		CLIVersion: cliVersion,
+		Operation:  operation,
+		Status:     status,
+		Omissions:  []Omission{},
 	}
 }
 
 func (e Envelope) Validate() error {
-	if e.SchemaVersion != SchemaVersion {
-		return errors.New("invalid contract version")
-	}
 	if e.Data != nil {
 		if e.Data.Repository != nil && !ValidDirectoryPath(e.Data.Repository.CommonDir) {
 			return errors.New("invalid repository target")

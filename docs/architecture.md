@@ -305,8 +305,10 @@ Structured diagnostics must not copy source data or underlying errors unless nec
 
 ### Public format versioning
 
-Reference formats, hint algorithms, verification hashing, and the public response schema are versioned separately.\
-A schema change alone must not change an otherwise identical source reference, hint, or verified version.\
+The configuration and the CLI response each have one current format, defined in the [CLI JSON reference](cli-json-contract.md).
+
+Reference formats, hint algorithms, and verification hashing are versioned separately.\
+A change to the response format alone must not change an otherwise identical source reference, hint, or verified version.\
 The CLI reference defines exact reference and verification encodings; provider documents define their hint algorithms.
 
 ### Provider compatibility maintenance

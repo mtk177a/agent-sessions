@@ -98,7 +98,6 @@ func TestBoundsRejectEveryOversizedStructuralString(t *testing.T) {
 		name string
 		set  func(*Envelope)
 	}{
-		{"schema_version", func(e *Envelope) { e.SchemaVersion = oversized }},
 		{"operation", func(e *Envelope) { e.Operation = oversized }},
 		{"status", func(e *Envelope) { e.Status = Status(oversized) }},
 		{"data_source_ref", func(e *Envelope) { e.Data.SourceRef = oversized }},
@@ -153,18 +152,6 @@ func TestBoundsAndCompletenessInvariants(t *testing.T) {
 	invalid.Omissions = []Omission{{Code: "unknown_shape", Scope: "source", Message: "An unknown shape was omitted."}}
 	if err := invalid.Validate(); err == nil {
 		t.Fatal("complete result with an omission was accepted")
-	}
-}
-
-func TestEnvelopeRejectsUnsupportedSchemaVersions(t *testing.T) {
-	for _, version := range []string{"v0alpha1", "v1", "v3"} {
-		t.Run(version, func(t *testing.T) {
-			envelope := NewEnvelope("list", "test", StatusComplete)
-			envelope.SchemaVersion = version
-			if err := envelope.Validate(); err == nil {
-				t.Fatalf("schema version %q was accepted", version)
-			}
-		})
 	}
 }
 

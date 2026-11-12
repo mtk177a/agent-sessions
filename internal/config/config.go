@@ -11,16 +11,14 @@ import (
 )
 
 const (
-	SchemaVersion = "v1"
-	MaxBytes      = 1 << 20
-	MaxDepth      = contract.MaxJSONDepth
+	MaxBytes = 1 << 20
+	MaxDepth = contract.MaxJSONDepth
 )
 
 var ErrSourceUnresolved = errors.New("source instance cannot be resolved")
 
 type Config struct {
-	SchemaVersion string   `json:"schema_version"`
-	Sources       []Source `json:"sources"`
+	Sources []Source `json:"sources"`
 }
 
 type Source struct {
@@ -43,16 +41,16 @@ func DefaultPath() (string, error) {
 }
 
 func Load(path string, explicit bool) (Config, error) {
-	var result Config
+	var result *Config
 	err := safeio.DecodeJSONFile(path, MaxBytes, MaxDepth, &result)
 	if errors.Is(err, os.ErrNotExist) && !explicit {
-		return Config{SchemaVersion: SchemaVersion, Sources: []Source{}}, nil
+		return Config{Sources: []Source{}}, nil
 	}
 	if err != nil {
 		return Config{}, err
 	}
-	if result.SchemaVersion != SchemaVersion {
-		return Config{}, errors.New("unsupported configuration schema version")
+	if result == nil {
+		return Config{}, errors.New("configuration must be a JSON object")
 	}
 	seen := map[string]struct{}{}
 	for _, source := range result.Sources {
@@ -68,7 +66,7 @@ func Load(path string, explicit bool) (Config, error) {
 		}
 		seen[key] = struct{}{}
 	}
-	return result, nil
+	return *result, nil
 }
 
 func ResolveOne(provider, instance, override string, configured Config, defaults Defaults) (Source, error) {

@@ -25,7 +25,7 @@ func TestProductionRegistryListsOneAvailableDefaultProvider(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
 			t.Setenv("CODEX_HOME", "")
 			configPath := filepath.Join(home, "config.json")
-			if err := os.WriteFile(configPath, []byte(`{"schema_version":"v1","sources":[]}`), 0o600); err != nil {
+			if err := os.WriteFile(configPath, []byte(`{"sources":[]}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
 
@@ -60,7 +60,7 @@ func TestProductionRegistrySupportsBothProvidersEndToEnd(t *testing.T) {
 	writeCodexTranscript(t, codexRoot)
 
 	configPath := filepath.Join(root, "config.json")
-	configured := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"claude-one","provider":"claude","root":%q},{"id":"codex-one","provider":"codex","root":%q}]}`, claudeRoot, codexRoot)
+	configured := fmt.Sprintf(`{"sources":[{"id":"claude-one","provider":"claude","root":%q},{"id":"codex-one","provider":"codex","root":%q}]}`, claudeRoot, codexRoot)
 	if err := os.WriteFile(configPath, []byte(configured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestProductionRegistrySupportsChatGPTDataExport(t *testing.T) {
 	exportPath := filepath.Join(root, "chatgpt-export.zip")
 	writeChatGPTExport(t, exportPath)
 	configPath := filepath.Join(root, "config.json")
-	configured := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, exportPath)
+	configured := fmt.Sprintf(`{"sources":[{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, exportPath)
 	if err := os.WriteFile(configPath, []byte(configured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestProductionRegistryPaginatesMixedProviderInteractionTimes(t *testing.T) 
 		{"id":"untimed","current_node":"user","mapping":{"user":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["hello"]}}}}}
 	]`)
 	configPath := filepath.Join(root, "config.json")
-	configured := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"claude-one","provider":"claude","root":%q},{"id":"codex-one","provider":"codex","root":%q},{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, claudeRoot, codexRoot, exportPath)
+	configured := fmt.Sprintf(`{"sources":[{"id":"claude-one","provider":"claude","root":%q},{"id":"codex-one","provider":"codex","root":%q},{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, claudeRoot, codexRoot, exportPath)
 	if err := os.WriteFile(configPath, []byte(configured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestChatGPTEventsRetainRecordedContentInV2(t *testing.T) {
 	content := `[{"id":"fictional-conversation","conversation_id":"fictional-conversation","current_node":"user","mapping":{"user":{"parent":null,"message":{"author":{"role":"user"},"content":{"content_type":"text","parts":["token=sk-fictional-secret"]}}}}}]`
 	writeChatGPTExportContent(t, exportPath, content)
 	configPath := filepath.Join(root, "config.json")
-	configured := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, exportPath)
+	configured := fmt.Sprintf(`{"sources":[{"id":"chatgpt-one","provider":"chatgpt","root":%q}]}`, exportPath)
 	if err := os.WriteFile(configPath, []byte(configured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestProductionRegistryDoesNotSkipExplicitOrConfiguredRoots(t *testing.T) {
 	home := t.TempDir()
 	missing := filepath.Join(home, "missing")
 	configuredPath := filepath.Join(home, "configured.json")
-	configured := fmt.Sprintf(`{"schema_version":"v1","sources":[{"id":"claude-default","provider":"claude","root":%q}]}`, missing)
+	configured := fmt.Sprintf(`{"sources":[{"id":"claude-default","provider":"claude","root":%q}]}`, missing)
 	if err := os.WriteFile(configuredPath, []byte(configured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func runProductionCLI(t *testing.T, runner cli.Runner, args ...string) contract.
 		t.Fatal(err)
 	}
 	wantPartialTime := (envelope.Operation == "list" || envelope.Operation == "show") && hasOmissionCode(envelope.Omissions, "source_time_unavailable")
-	if envelope.SchemaVersion != "v2" || (envelope.Status != contract.StatusComplete && !(wantPartialTime && envelope.Status == contract.StatusPartial)) || envelope.Omissions == nil {
+	if envelope.CLIVersion == "" || (envelope.Status != contract.StatusComplete && !(wantPartialTime && envelope.Status == contract.StatusPartial)) || envelope.Omissions == nil {
 		t.Fatalf("unstable envelope for %v: %#v", args, envelope)
 	}
 	return envelope

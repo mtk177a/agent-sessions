@@ -17,12 +17,8 @@ func newEventNormalizer(threadID string) *eventNormalizer {
 }
 
 func (n *eventNormalizer) consume(origin artifact, line rolloutLine) {
-	profile := compatibilityProfile(origin.meta.CLIVersion, origin.meta.HistoryMode)
+	profile := contentRowProfile(origin, line)
 	if profile == profileUnsupported {
-		n.omissions = append(n.omissions, omission("unsupported_format", "events", "The Codex artifact version and history mode have not been verified."))
-		return
-	}
-	if !validRowForProfile(profile, origin.meta.CLIVersion, line, false) {
 		n.omissions = append(n.omissions, omission("unknown_format", "events", "A Codex JSONL row or payload type was not recognized for its stored format."))
 		return
 	}

@@ -82,20 +82,18 @@ agent-sessions events --root /fictional/codex-home '<source_ref from list>'
 
 ## 対応形式
 
-イベントのデコードと形式の検証では、`0.92.0` から `0.155.0-alpha.9.2` までに観測した 32 個の版名について、確認済みの履歴方式と構造の組み合わせを受け付ける。
-
-この範囲内のすべての版に対応するのではなく、版名と履歴方式を明示的に指定している。\
-受け付ける正確な組み合わせは、[アダプターの互換性一覧](../../internal/provider/codex/compatibility.go) を参照する。
-
-操作ごとの対応範囲を次に示す。
+保存済みの `legacy` と `paginated` の履歴は、CLI 版が [アダプターの互換性一覧](../../internal/provider/codex/compatibility.go) にない場合も、`events` と `verify` で読み取れる。
 
 | 操作 | 対応範囲 |
 | --- | --- |
-| `events` と `verify` | 上記の明示的な版名と履歴方式の組み合わせ。 |
-| `list` と `show` の時刻取得 | 上記に加え、すべての採用行が既知の構造を保つ、構文上有効な `0.155.0` 以降の版。版の上限は設けない。 |
+| `events` と `verify` | 一覧にある版と履歴方式の組み合わせには、確認済みの読み取り規則を適用する。それ以外は、保存された履歴方式と既知の行構造に基づいて読み取る。 |
+| `list` と `show` の時刻取得 | 一覧にある組み合わせと、すべての採用行が既知の構造を保つ、構文上有効な `0.155.0` 以降の版。 |
 
-時刻取得の前方互換によって、`events` と `verify` の検証済みの対応範囲は増えない。\
-未知の行や不正な時刻がある場合、ソースの最終時刻は確定しない。
+履歴の順序と範囲を確定できる場合、`events` は読み取れるイベントを保存順に返し、解釈できない行を欠落として報告する。\
+`verify` はその行を欠落として報告し、検証済みバージョンの算出にはその行のバイト列も含める。\
+順序や継承する範囲を確定できない場合は、どちらの操作も `unsupported` を返す。
+
+`events` が一部のイベントを返せる場合でも、未知の行や不正な時刻があると最後のやり取りの時刻を確定できないことがある。
 
 **圧縮ロールアウト**
 
@@ -194,20 +192,21 @@ Codex アダプターの入力には、次の上限を設ける。
 **対応形式**
 
 アダプターは legacy、native paginated、canonicalized legacy paginated の履歴を区別する。\
-対応する版名と履歴方式の組み合わせは、[アダプターの互換性一覧](../../internal/provider/codex/compatibility.go) で定義する。
-
-native paginated 形式は、`0.144.5` 以降の明示的に受け付ける版名を対象とする。
+[アダプターの互換性一覧](../../internal/provider/codex/compatibility.go) は、観測した版と履歴方式の組み合わせごとに読み取り規則を定める。
 
 canonicalized legacy paginated 形式は、確認済みの移行後版名 `0.92.0`、`0.94.0`、`0.94.0-alpha.10`、`0.95.0-alpha.3`、`0.98.0`、`0.99.0-alpha.5`、`0.101.0`、`0.117.0`、`0.118.0`、`0.139.0`、`0.142.5`、`0.144.2` を対象とする。
 
+Codex の [旧形式からページ分割形式への移行処理](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs) は、保存行を書き換えるとき、ヘッダーの CLI 版を保持する。\
+確認済みの移行履歴では、旧形式の応答行からツール呼び出しと結果を取得し、完了済み項目から同じ実行を重ねて出力することを防ぐ。
+
 **構造の検査**
 
-canonicalized legacy paginated 形式では、行番号の連続性と、確認済みの移行後の行だけが含まれることを必須とする。
+一覧にない組み合わせでは、履歴方式が `legacy` または省略されていれば legacy の読み取り規則を使い、`paginated` なら native paginated の読み取り規則を使う。\
+採用する各行について、その規則が認識する行の種類と必須の JSON フィールドを確認する。\
+フィールドの追加は許容する。
 
-未知の行、未対応の履歴方式、行番号の不一致があれば、影響する観測を利用可能としない。\
-ヘッダーの版名だけでは対応可否を判断しない。
-
-Codex の [旧形式からページ分割形式への移行処理](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs) は、保存行を書き換えるとき、ヘッダーの CLI 版を保持する。
+一覧にない `paginated` の履歴と、確認済みの移行履歴では、行番号の連続性が必須である。\
+canonicalized legacy paginated 形式では、移行履歴で確認した行の種類も検査する。
 
 ### 論理履歴の構成
 
@@ -277,8 +276,6 @@ Codex の [旧形式からページ分割形式への移行処理](https://githu
 将来版の paginated 記録では行番号の連続性を必須とし、採用するすべての行が、既知のメッセージ、ツール、応答、ライフサイクル、管理用の形式に一致しなければならない。\
 やり取りとして時刻を進める既知のイベント行と応答行は、既知の構造で必須となる最上位フィールドと JSON 型を維持しなければならないが、フィールドの追加は許容する。
 
-この構造上の互換性を適用するのは `list` と `show` だけであり、`events` と `verify` は前述の確認済み版一覧を維持する。
-
 ##### 記録の種類ごとの時刻判定
 
 記録の種類ごとの時刻への影響を次に示す。\
@@ -311,8 +308,7 @@ Canonicalized legacy paginated ロールアウトでは、観測済みのメッ�
 
 `list` と `show` は `session_meta.payload.cwd`、`turn_context.payload.cwd`、完了した `CommandExecution.cwd`、記録された従来の `local_shell_call.action.cwd` を読む。\
 コマンド文字列を解析せず、共通の `session`、`turn`、`tool` の根拠にする。\
-作業場所の取得には、構造を条件とする将来版への対応を含め、既存のやり取り時刻の版・プロファイル・行構造の境界を使う。\
-`events` と `verify` の対応は広げない。
+作業場所の取得には、将来版の構造の検査を含め、やり取り時刻の対応条件を使う。
 
 `CommandExecution.cwd` は `PathUri` 形式で記録される。\
 アダプターはローカルの `file:` URI を実行環境のパス形式に従う絶対パスへ変換し、絶対パスで記録された値も受け付ける。\
@@ -463,7 +459,7 @@ native paginated 形式の項目と応答の保存規則は、対応する公式
 
 `0.153.0` の境界は、公式の [`rust-v0.153.0` の履歴実装](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs) に対して確認した。
 
-対応版は、公式の [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs)、[`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs)、[`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs)、[`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) の項目定義と、保存済みロールアウトの構造に対する上限付き・読み取り専用の調査で確認した。\
+一覧にあるこれらの版は、公式の [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs)、[`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs)、[`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs)、[`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) の項目定義と、保存済みロールアウトの構造に対する上限付き・読み取り専用の調査で確認した。\
 非公開の本文や識別子は、このリポジトリへ複製していない。
 
 **App の版**

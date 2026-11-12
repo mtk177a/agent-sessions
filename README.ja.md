@@ -53,12 +53,12 @@ agent-sessions --version
 agent-sessions list --provider codex
 ```
 
-**実行結果:** 応答の `data.sources` にある各項目が、一つのセッションを表す。
+**実行結果:** 応答の `data.sources` では、各項目がセッション 1 件に対応する。
 
 #### 3. セッションを読む
 
 手順 2 の結果から、読みたいセッションの `identity.source_ref` をコピーする。\
-値を変更せずに次のプレースホルダーと置き換え、コマンドを実行する。
+下のコマンドの `<source_ref from list>` を、コピーした値でそのまま置き換えて実行する。
 
 > **注意:** 出力には機密情報が含まれる場合がある。
 > このツールは、その内容を自動で伏せない。
@@ -71,7 +71,7 @@ agent-sessions events '<source_ref from list>'
 **結果の確認:**
 
 - `data.events`: 取得したメッセージやツールの記録。
-- `status` と `omissions`: 結果に欠けている情報があるかと、省略の理由。
+- `status` は結果が揃っているかを示す。`omissions` では省略の理由を確認できる。
 
 ページ分割と内容の上限は [JSON 応答を処理する](#json-応答を処理する) を参照する。
 
@@ -93,7 +93,7 @@ agent-sessions events '<source_ref from list>'
 | --- | --- | --- |
 | `codex` | Codex ホーム | [Codex](docs/ja/provider-codex.md) |
 | `claude` | Claude Code の設定ルート | [Claude Code](docs/ja/provider-claude-code.md) |
-| `chatgpt` | 一つの Data Export ZIP | [ChatGPT Data Export](docs/ja/provider-chatgpt-export.md) |
+| `chatgpt` | Data Export ZIP ファイル 1 個 | [ChatGPT Data Export](docs/ja/provider-chatgpt-export.md) |
 
 Codex と Claude Code は、`agent-sessions` の設定ファイルがなくても、プロバイダーの環境変数や既定のホームを使える。\
 次のコマンドで、これらの場所にある記録を一覧にできる。
@@ -120,11 +120,11 @@ agent-sessions list --provider chatgpt --source-instance chatgpt-export --root /
 `list` に `--root` を使った場合は、後続の `show`、`events`、`verify` にも同じルートを使う。\
 ソース参照は記録を識別するが、ファイルシステム上のパスは含まない。
 
-コマンドごとに `--root` を指定する代わりに、保存場所を設定ファイルに記述できる。\
-設定の説明では、次の用語を使う。
+同じ保存場所を繰り返し読む場合は、設定ファイルに登録して、コマンドごとの `--root` を省略できる。\
+設定では、保存場所と、その中にあるセッションや会話を次のように呼び分ける。
 
-- **ソースインスタンス**: プロバイダーの保存場所やエクスポートに付ける名前。
-- **ソース**: ソースインスタンス内で個別に指定できる一つのセッションや会話。
+- **ソースインスタンス**: プロバイダーの保存場所やエクスポートを指定するときに使う名前。
+- **ソース**: ソースインスタンス内で個別に指定できるセッションや会話。
 
 標準以外の場所や複数の保存場所の設定方法は、[名前付きソースインスタンスと設定](docs/ja/cli-json-contract.md#読み取り対象の設定) を参照する。
 
@@ -136,12 +136,12 @@ linked worktree を含めて、ローカル Git リポジトリを選ぶ。
 agent-sessions list --repository /fictional/project
 ```
 
-記録された作業ディレクトリを検索する。\
-会話の途中で変わった作業ディレクトリも、対応する形式で記録されていれば検索対象にする。\
-`--repository` は作業対象を選び、`--root` は引き続き提供元の記録を選ぶ。\
+`--repository` に指定したリポジトリで作業したセッションを探す。\
+会話の途中で作業ディレクトリが変わった場合も、変更先が対応形式で記録されていれば検索対象になる。\
+履歴ファイルの保存場所を指定するには `--root` を使う。\
 独立した clone と入れ子のリポジトリは区別する。\
-`status` と `omissions` を確認する。\
-指定したリポジトリに属するか判定できない候補がある場合、一致が 0 件でも、該当する会話がないとは判断できない。\
+検索結果が揃っているかは `status` と `omissions` で確認する。\
+指定したリポジトリで作業したかを判定できないセッションが残っている場合は、一致が 0 件でも、該当する会話がないとは判断できない。\
 [リポジトリ検索と限界](docs/ja/cli-json-contract.md#ローカル-git-リポジトリのセッションを探す) を参照する。
 
 ### 実行するコマンドを選ぶ
@@ -151,22 +151,22 @@ agent-sessions list --repository /fictional/project
 | コマンド | 用途 |
 | --- | --- |
 | `list` | セッションや会話を探し、ソース参照を取得する。 |
-| `show <source-ref>` | 一つの記録の概要メタデータを読む。 |
+| `show <source-ref>` | 指定した記録 1 件の概要をメタデータで取得する。 |
 | `events <source-ref>` | メッセージ、記録されたツール呼び出しと結果を、ページに分けて読む。 |
-| `verify <source-ref>` | 検証対象の内容を識別するハッシュ値を取得する。参照した内容の記録や、同じソースの内容の比較に使う。 |
+| `verify <source-ref>` | 参照した内容を記録したり、同じソースを読み直したときに内容を照合したりするためのハッシュ値を取得する。 |
 
 利用可能なフラグは [コマンド構文とオプション](docs/ja/cli-json-contract.md#コマンドの呼び出し) を参照する。
 
 ### JSON 応答を処理する
 
-セッションを扱うコマンドは、[現行の応答形式](docs/ja/cli-json-contract.md#json-応答の構成) に従って JSON オブジェクトを一つ返す。
+セッションを扱うコマンドは、[現行の応答形式](docs/ja/cli-json-contract.md#json-応答の構成) に従って JSON オブジェクトを 1 個返す。
 
-結果に省略があるか、次のページがあるかは、次のフィールドで確認する。
+結果が揃っているか、続けて取得するページがあるかを確認する。
 
 | フィールド | 用途 |
 | --- | --- |
-| `status`、`omissions` | `status` は処理結果の状態を示す。`omissions` は、省略された情報や判定できなかった項目と、その理由を示す。 |
-| `page.has_more`、`page.next_cursor` | 後続のページの有無と、次のページを要求する方法を示す。 |
+| `status`、`omissions` | `status` で結果の状態を確認し、`omissions` で情報が省かれた理由や、判定できなかった理由を確認する。 |
+| `page.has_more`、`page.next_cursor` | `page.has_more` で次のページがあるかを確認し、`page.next_cursor` を使って次のページを取得する。 |
 
 終了コード `0` には、完全な結果と部分的な結果の両方が含まれる。\
 終了コードだけで、必要な情報をすべて取得できたかを判断してはならない。
@@ -207,14 +207,14 @@ agent-sessions list --repository /fictional/project
 
 ### 設計資料
 
-- [アーキテクチャ](docs/ja/architecture.md): 責任分担、データの流れ、識別、変更時に守る制約。
+- [アーキテクチャ](docs/ja/architecture.md): 誰がどの処理を担うか、データがどう流れ、記録をどう識別するかを説明する。実装を変更するときに維持する設計上の要件も確認できる。
 - [設計判断](docs/ja/architecture.md#設計判断): 現在の設計を選んだ理由と、見直す条件。
 
 ### 変更時の規則
 
 変更内容に応じて、次の資料の規則に従う。
 
-- [リポジトリの指示](AGENTS.md): 貢献時の制約。
+- [リポジトリの指示](AGENTS.md): リポジトリに変更を加えるときに守るルール。
 - [保守](docs/ja/architecture.md#保守): 互換性と入力の安全性の要件。
 - [言語と日本語参考訳](docs/ja/localization.md): 両言語で保守するファイル。
 

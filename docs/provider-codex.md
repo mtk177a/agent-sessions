@@ -78,20 +78,18 @@ If you use provider settings or a configured instance, omit `--root` from this c
 
 ## Supported formats
 
-Event decoding and format verification accept the verified mode and structure combinations for the 32 observed version labels from `0.92.0` through `0.155.0-alpha.9.2`.
-
-This is an explicit set of labels and history modes, not every version in that interval.\
-See the [compatibility table in the adapter](../internal/provider/codex/compatibility.go) for exact accepted combinations.
-
-The operations have these compatibility boundaries:
+Use `events` and `verify` with saved `legacy` and `paginated` history, including recordings with CLI versions that are absent from the [compatibility table](../internal/provider/codex/compatibility.go).
 
 | Operation | Compatibility boundary |
 | --- | --- |
-| `events` and `verify` | The explicit version-label and history-mode combinations above. |
-| Interaction time in `list` and `show` | Additionally, syntactically valid versions at or after `0.155.0` when all included rows retain known structures; there is no version ceiling. |
+| `events` and `verify` | Listed version and mode combinations use their verified profiles. Other combinations use the stored mode and require known row structures. |
+| Interaction time in `list` and `show` | Listed combinations and syntactically valid versions at or after `0.155.0` when all included rows retain known structures. |
 
-Forward-compatible interaction-time reading does not extend verified `events` and `verify` support.\
-Unknown rows or unusable timestamps prevent an established source time.
+When the order and range of the history are known, `events` returns the events it can read in stored order and reports omissions for unrecognized rows.\
+`verify` reports these rows as omissions and includes their bytes in the verified version.\
+Both operations return `unsupported` if the adapter cannot establish the order or inherited range.
+
+An unrecognized row or unusable timestamp can make the last interaction time unavailable even when `events` returns some events.
 
 **Compressed rollouts**
 
@@ -189,19 +187,21 @@ It accepts only bounded regular files contained by the provider root, rejects sy
 **Accepted profiles**
 
 The adapter distinguishes legacy, native paginated, and canonicalized legacy paginated history.\
-The [adapter compatibility table](../internal/provider/codex/compatibility.go) defines the accepted version-label and history-mode combinations.
-
-The native paginated profile covers the explicitly accepted labels from `0.144.5` onward.
+The [adapter compatibility table](../internal/provider/codex/compatibility.go) assigns profiles to observed version and mode combinations.
 
 The canonicalized legacy paginated profile covers the verified migrated labels `0.92.0`, `0.94.0`, `0.94.0-alpha.10`, `0.95.0-alpha.3`, `0.98.0`, `0.99.0-alpha.5`, `0.101.0`, `0.117.0`, `0.118.0`, `0.139.0`, `0.142.5`, and `0.144.2`.
 
+Codex's [legacy-to-paginated migration](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs) retains the header CLI version while rewriting the stored rows.\
+For the verified migrated profiles, legacy response rows remain the source of tool calls and results so the adapter does not emit the same execution again from a completed item.
+
 **Structural validation**
 
-The canonicalized legacy paginated profile requires contiguous ordinals and the verified migrated row vocabulary.
+For combinations absent from the table, `events` and `verify` use the legacy profile for `legacy` or an absent history mode, and the native paginated profile for `paginated`.\
+The adapter checks each included row against the known types and required JSON fields for that profile.\
+Additional fields are allowed.
 
-An unrecognized row, an unsupported history mode, or invalid ordinals leaves the affected observation unavailable; the header version alone does not establish compatibility.
-
-Codex's [legacy-to-paginated migration](https://github.com/openai/codex/blob/94174e44cbc54cece45f6052328ca0c2cd7a8a2a/codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs) retains the header CLI version while rewriting the stored rows.
+Structural reading of unlisted paginated history and reading of verified migrated history require contiguous ordinals.\
+The canonicalized legacy paginated profile also checks the verified migrated row types.
 
 ### Logical history construction
 
@@ -270,8 +270,6 @@ Interaction-time decoding additionally accepts syntactically valid versions at o
 This forward-compatible boundary has no version ceiling: future paginated records require contiguous ordinals and every included row must match the known message, tool, response, lifecycle, or bookkeeping shape.\
 Known event and response rows that can advance interaction time must retain the required top-level fields and JSON types of the known structure; additional fields remain allowed.
 
-This structural compatibility applies only to `list` and `show`; `events` and `verify` retain the verified version list above.
-
 ##### Time classification by record type
 
 The following records affect the latest source interaction time as shown.\
@@ -304,7 +302,7 @@ Missing or invalid timestamps, uncertain rows, unresolved history, and input lim
 
 `list` and `show` read `session_meta.payload.cwd`, `turn_context.payload.cwd`, completed `CommandExecution.cwd`, and recorded legacy `local_shell_call.action.cwd`.\
 These become common `session`, `turn`, and `tool` evidence, without parsing command strings.\
-Directory extraction uses the existing interaction-time version/profile and row-structure boundary, including its structural forward compatibility; it does not expand `events` or `verify` support.
+Directory extraction uses the interaction-time compatibility rules, including the structural checks for later versions.
 
 `CommandExecution.cwd` uses the `PathUri` format.\
 The adapter decodes local `file:` URIs to absolute paths in the host's path syntax and also accepts recorded absolute paths.\
@@ -336,7 +334,13 @@ The history profile determines which rows become public events:
 | Native paginated | Completed `UserMessage`, `AgentMessage`, `CommandExecution`, `McpToolCall`, and `DynamicToolCall` items are canonical. Lower-level response rows are not emitted again. |
 | Canonicalized legacy paginated | Completed message items are canonical. Legacy response rows provide tool call/result correlation; completed tool items are not emitted again. |
 
+For paginated version and mode combinations absent from the compatibility table, `events` reports an omission for each lower-level tool call or result row that the legacy reader can normalize.\
+The adapter cannot establish whether these rows duplicate completed items in that history.
+
 **Rows outside the public event model**
+
+For legacy and paginated version and mode combinations absent from the compatibility table, `events` reports `web_search_call`, `tool_search_call`, and `tool_search_output` response rows as `unsupported_event` omissions.\
+`verify` includes these recognized rows in the verified version of the selected history.
 
 For `0.153.0`, `token_usage_record` is bookkeeping.\
 An encountered `realtime_item` remains incomplete because its interaction meaning is not normalized.
@@ -391,14 +395,13 @@ MCP text and `structuredContent` are both retained; dynamic `inputText` and lega
 Multiple text blocks use an ordered JSON array; non-text and unsupported portions are reported as omissions.\
 Known error fields are retained and, when output also exists, represented as JSON with `output` and `error`.
 
-Verified native paginated `FunctionCallOutput` items also retain their bodies.
+Completed `FunctionCallOutput` items in legacy and native paginated history also retain their bodies.
 
 **Call relationship**
 
 Correlation is resolved over the selected logical history; unmatched or duplicate-identifier results retain their bodies.
 
-Item IDs of native paginated `FunctionCallOutput` records do not establish call correlation.\
-These items remain standalone results.
+Completed `FunctionCallOutput` items are standalone results because their item IDs do not establish call correlation.
 
 **Outcome**
 
@@ -407,11 +410,11 @@ If these do not establish an outcome, it is `unknown`; text such as `PASS` never
 
 Legacy output rows do not persist the internal success value, so the adapter retains their bodies with `outcome: unknown`.
 
-Standalone native paginated `FunctionCallOutput` results also have unknown outcomes.
+Standalone `FunctionCallOutput` results also have unknown outcomes.
 
 **Metadata**
 
-The recorded name of a standalone native paginated `FunctionCallOutput` is retained in `tool_name` metadata.
+The recorded name of a standalone `FunctionCallOutput` is retained in `tool_name` metadata.
 
 ##### Provider error events
 
@@ -454,7 +457,7 @@ The rollout compatibility evidence includes the official `openai/codex` tag [`ru
 
 The `0.153.0` boundary was checked against the official [`rust-v0.153.0` history implementation](https://github.com/openai/codex/blob/rust-v0.153.0/codex-rs/history/src/lib.rs).
 
-The accepted versions were checked against their official [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs), [`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs), [`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs), and [`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) item definitions and against bounded, read-only structural inspection of saved rollouts; no private contents or identifiers were copied into this repository.
+These listed versions were checked against their official [`0.152.0`](https://github.com/openai/codex/blob/rust-v0.152.0/codex-rs/protocol/src/items.rs), [`0.153.3`](https://github.com/openai/codex/blob/rust-v0.153.3/codex-rs/protocol/src/items.rs), [`0.153.4`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/items.rs), and [`0.154.0`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/protocol/src/items.rs) item definitions and against bounded, read-only structural inspection of saved rollouts; no private contents or identifiers were copied into this repository.
 
 **App builds**
 

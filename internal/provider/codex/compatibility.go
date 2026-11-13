@@ -16,7 +16,7 @@ type versionCompatibility struct {
 	legacy    bool
 }
 
-type timeCompatibility struct {
+type historyCompatibility struct {
 	profile         storageProfile
 	forward         bool
 	requireOrdinals bool
@@ -77,21 +77,37 @@ func supportsInteractionTime(version, historyMode string) bool {
 	return interactionTimeCompatibility(version, historyMode).profile != profileUnsupported
 }
 
-func interactionTimeCompatibility(version, historyMode string) timeCompatibility {
-	if profile := compatibilityProfile(version, historyMode); profile != profileUnsupported {
-		return timeCompatibility{profile: profile, requireOrdinals: profile == profileCanonicalizedLegacyPaginated}
+func interactionTimeCompatibility(version, historyMode string) historyCompatibility {
+	compatibility := contentCompatibility(version, historyMode)
+	if compatibility.forward && !provider.SemverAtLeast(version, "0.155.0") {
+		return historyCompatibility{}
 	}
-	if !provider.SemverAtLeast(version, "0.155.0") {
-		return timeCompatibility{}
+	return compatibility
+}
+
+// contentCompatibility preserves verified profiles, including migrated
+// rollouts whose stored version predates their current paginated format.
+// Other rollouts must use the known row structures of their stored mode.
+func contentCompatibility(version, historyMode string) historyCompatibility {
+	if profile := compatibilityProfile(version, historyMode); profile != profileUnsupported {
+		return historyCompatibility{profile: profile, requireOrdinals: profile == profileCanonicalizedLegacyPaginated}
 	}
 	switch historyMode {
 	case "paginated":
-		return timeCompatibility{profile: profileNativePaginated, forward: true, requireOrdinals: true}
+		return historyCompatibility{profile: profileNativePaginated, forward: true, requireOrdinals: true}
 	case "legacy":
-		return timeCompatibility{profile: profileLegacy, forward: true}
+		return historyCompatibility{profile: profileLegacy, forward: true}
 	default:
-		return timeCompatibility{}
+		return historyCompatibility{}
 	}
+}
+
+func contentRowCompatibility(origin artifact, line rolloutLine) historyCompatibility {
+	compatibility := contentCompatibility(origin.meta.CLIVersion, origin.meta.HistoryMode)
+	if validRowForProfile(compatibility.profile, origin.meta.CLIVersion, line, compatibility.forward) {
+		return compatibility
+	}
+	return historyCompatibility{}
 }
 
 func supportsTokenUsageRecord(value string) bool {

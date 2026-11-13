@@ -186,7 +186,7 @@ func observeArtifact(source config.Source, selected artifact, ambiguous bool, by
 }
 
 func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint string) provider.EventResult {
-	selected, discovered, omissions, err := a.findHistory(source, fingerprint)
+	selected, discovered, err := a.findHistory(source, fingerprint)
 	if err != nil {
 		if errors.Is(err, errAmbiguousArtifact) {
 			return provider.EventResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("ambiguous_artifact", "events", "Multiple current artifacts could not be distinguished safely.")}}
@@ -196,18 +196,17 @@ func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint st
 	if selected.compressed {
 		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("unsupported_compression", "events", "Compressed Codex rollout artifacts are not supported.")}}
 	}
-	selectedProfile := compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode)
 	spans, err := resolveHistory(selected, discovered.byRollout)
 	if err != nil {
-		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "events", "The effective Codex history could not be resolved safely."))}
+		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("unsupported_format", "events", "The effective Codex history could not be resolved safely.")}}
 	}
 	normalizer := newEventNormalizer(selected.threadID)
-	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, selectedProfile == profileCanonicalizedLegacyPaginated, normalizer.consume)
+	compatibility := contentCompatibility(selected.meta.CLIVersion, selected.meta.HistoryMode)
+	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, compatibility.requireOrdinals, normalizer.consume)
 	if err != nil {
-		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "events", "The effective Codex history could not be read safely."))}
+		return provider.EventResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("unsupported_format", "events", "The effective Codex history could not be read safely.")}}
 	}
-	events, rowOmissions := normalizer.finish()
-	omissions = append(omissions, rowOmissions...)
+	events, omissions := normalizer.finish()
 	if plan.malformedRows > 0 {
 		omissions = append(omissions, omission("malformed_record", "events", "A Codex JSONL row could not be decoded."))
 	}
@@ -221,7 +220,7 @@ func (a *Adapter) Events(_ context.Context, source config.Source, fingerprint st
 }
 
 func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint string) provider.EvidenceResult {
-	selected, discovered, omissions, err := a.findHistory(source, fingerprint)
+	selected, discovered, err := a.findHistory(source, fingerprint)
 	if err != nil {
 		if errors.Is(err, errAmbiguousArtifact) {
 			return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("ambiguous_artifact", "verification", "Multiple current artifacts could not be distinguished safely.")}}
@@ -233,19 +232,18 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 	}
 	spans, err := resolveHistory(selected, discovered.byRollout)
 	if err != nil {
-		return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "verification", "The effective Codex history could not be resolved safely."))}
+		return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("unsupported_format", "verification", "The effective Codex history could not be resolved safely.")}}
 	}
-	formatOmissions := []contract.Omission{}
-	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode) == profileCanonicalizedLegacyPaginated, func(origin artifact, line rolloutLine) {
-		profile := compatibilityProfile(origin.meta.CLIVersion, origin.meta.HistoryMode)
-		if profile == profileUnsupported || !validRowForProfile(profile, origin.meta.CLIVersion, line, false) {
-			formatOmissions = append(formatOmissions, omission("unknown_format", "verification", "A Codex row was not recognized for its stored format."))
+	omissions := []contract.Omission{}
+	compatibility := contentCompatibility(selected.meta.CLIVersion, selected.meta.HistoryMode)
+	plan, err := walkHistory(source.Root, spans, maxEffectiveHistoryBytes, maxHistoryRowBytes, compatibility.requireOrdinals, func(origin artifact, line rolloutLine) {
+		if contentRowCompatibility(origin, line).profile == profileUnsupported {
+			omissions = append(omissions, omission("unknown_format", "verification", "A Codex row was not recognized for its stored format."))
 		}
 	})
 	if err != nil {
-		return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: append(omissions, omission("unsupported_format", "verification", "The effective Codex history could not be read safely."))}
+		return provider.EvidenceResult{Status: contract.StatusUnsupported, Omissions: []contract.Omission{omission("unsupported_format", "verification", "The effective Codex history could not be read safely.")}}
 	}
-	omissions = append(omissions, formatOmissions...)
 	if plan.malformedRows > 0 {
 		omissions = append(omissions, omission("malformed_record", "verification", "A Codex JSONL row could not be decoded."))
 	}
@@ -277,24 +275,20 @@ func (a *Adapter) Evidence(_ context.Context, source config.Source, fingerprint 
 	}
 }
 
-func (a *Adapter) findHistory(source config.Source, fingerprint string) (artifact, discovery, []contract.Omission, error) {
+func (a *Adapter) findHistory(source config.Source, fingerprint string) (artifact, discovery, error) {
 	discovered, err := a.discover(source)
 	if err != nil {
-		return artifact{}, discovery{}, nil, err
+		return artifact{}, discovery{}, err
 	}
 	candidates, ok := discovered.byFingerprint[fingerprint]
 	if !ok {
-		return artifact{}, discovery{}, nil, provider.ErrNotFound
+		return artifact{}, discovery{}, provider.ErrNotFound
 	}
 	selected, ambiguous := selectArtifact(candidates)
-	omissions := []contract.Omission{}
 	if ambiguous {
-		return artifact{}, discovery{}, nil, errAmbiguousArtifact
+		return artifact{}, discovery{}, errAmbiguousArtifact
 	}
-	if compatibilityProfile(selected.meta.CLIVersion, selected.meta.HistoryMode) == profileUnsupported {
-		omissions = append(omissions, omission("unsupported_format", "source", "The Codex artifact version has not been verified for this adapter."))
-	}
-	return selected, discovered, omissions, nil
+	return selected, discovered, nil
 }
 
 func (a *Adapter) discover(source config.Source) (discovery, error) {

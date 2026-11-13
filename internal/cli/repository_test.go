@@ -35,7 +35,7 @@ func repo(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	git(t, path, "init", "-q")
-	git(t, path, "commit", "--allow-empty", "-qm", "Synthetic initial commit")
+	git(t, path, "-c", "maintenance.auto=false", "commit", "--allow-empty", "-qm", "Synthetic initial commit")
 	return path
 }
 func write(t *testing.T, path string, rows ...any) {

@@ -351,7 +351,7 @@ Codex の Git URL、ブランチ、コミットではローカル clone を識�
 
 **公開イベントにしない行**
 
-互換性一覧にない版と履歴方式の組み合わせで `legacy` または `paginated` を読む場合、`events` は `web_search_call`、`tool_search_call`、`tool_search_output` の応答行を `unsupported_event` として報告する。\
+互換性一覧にないバージョンと履歴モードの組み合わせで `legacy` または `paginated` を読む場合、`events` は `web_search_call`、`tool_search_call`、`tool_search_output` の応答行を `unsupported_event` として報告する。\
 `verify` は、選択した履歴の検証済みバージョンの算出に、これらの認識済みの行も含める。
 
 `0.153.0` の `token_usage_record` は管理用の記録である。\
